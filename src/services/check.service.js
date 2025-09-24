@@ -21,7 +21,11 @@ export default class CheckService {
         });
 
         const $ = cheerio.load(response.data);
-
+        const parseGB = (str) => {
+          if (!str) return 0;
+          const match = str.match(/(\d+)/);
+          return match ? parseInt(match[1], 10) : 0;
+        };
         // helper untuk title exact
         const getExactValueByTitle = (title) => {
           const item = $(".info-item").filter((_, el) => {
@@ -93,6 +97,9 @@ export default class CheckService {
         // Cara 1: pakai regex
         const match = kuotaPending.match(/\d+\s*GB/);
         // Push result bergantung Value Section
+        const sisa_kuota =
+          parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
+
         if (masaWaktu) {
           results.push({
             url: url_check,
@@ -104,13 +111,13 @@ export default class CheckService {
             },
             statusPaket,
             value: {
-              masaWaktu,
-              kuotaNasional,
-              kuotaLokal,
-              lainnya,
-              masaTungguPaket,
+              masa_waktu: masaWaktu,
+              kuota_nasional: kuotaNasional,
+              kuota_local: kuotaLokal,
+              kuota_lainnya: lainnya,
+              masa_tunggu_paket: masaTungguPaket,
             },
-            kuota: kuotaNasional,
+            kuota: `${sisa_kuota} GB`,
           });
         } else {
           results.push({
@@ -123,8 +130,8 @@ export default class CheckService {
             },
             statusPaket,
             value: {
-              kuotaPending,
-              redeemPending,
+              kuota_pending: kuotaPending,
+              redeem_pending: redeemPending,
             },
             kuota: match[0],
           });
