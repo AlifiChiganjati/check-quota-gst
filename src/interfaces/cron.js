@@ -2,6 +2,7 @@ import CheckService from "../services/check.service.js";
 import CheckRepository from "../repository/check.repository.js";
 import cron from "node-cron";
 import dns from "dns/promises";
+import { url } from "inspector";
 
 // Fungsi cek koneksi internet
 const isInternetAvailable = async () => {
@@ -24,17 +25,16 @@ const runCheck = async () => {
       await new Promise((r) => setTimeout(r, 10000));
       internet = await isInternetAvailable();
     }
-
-    // Ambil batch 5 data dengan status 0
-    const urls = await CheckRepository.getAllUrl();
-    if (!urls.length) {
-      console.log("Semua data hari ini sudah di-log, proses selesai");
-      break; // berhenti loop
-    }
-
     try {
+      // Ambil batch 5 data dengan status 0
+      const urls = await CheckRepository.getAllUrl();
+      if (!urls.length) {
+        console.log("Semua data hari ini sudah di-log, proses selesai");
+        break; // berhenti loop
+      }
+
       // checkAllUrls sudah otomatis ambil data dari repository
-      const checked = await CheckService.checkAllUrls();
+      const checked = await CheckService.checkAllUrls(urls);
       console.log(`Batch ${urls.length} selesai dicek`);
 
       await CheckService.insertDB(checked);

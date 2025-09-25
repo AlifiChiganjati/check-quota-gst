@@ -8,8 +8,7 @@ export default class CheckService {
     return await CheckRepository.getAllUrl();
   }
 
-  static async checkAllUrls() {
-    const urls = await CheckRepository.getAllUrl();
+  static async checkAllUrls(urls) {
     const results = [];
 
     for (const { url_check } of urls) {

@@ -2,10 +2,39 @@ import db from "../config/db.js";
 
 export default class CheckRepository {
   static async getAllUrl() {
-    const [rows] = await db.query(
-      "SELECT url_check,date_check,status FROM gst_check_quota WHERE status=0 ORDER BY RAND() LIMIT 5",
-    );
-    return rows;
+    const connection = await db.getConnection(); // pastikan pool support getConnection()
+    try {
+      await connection.beginTransaction();
+
+      // Ambil 5 data dengan kunci row
+      const [rows] = await connection.query(
+        `SELECT id, url_check, date_check, status
+       FROM gst_check_quota
+       WHERE status = 0
+       ORDER BY RAND()
+       LIMIT 5
+       FOR UPDATE`,
+      );
+
+      if (rows.length > 0) {
+        const ids = rows.map((r) => r.id);
+        // update status jadi 9 supaya tidak diambil proses lain
+        await connection.query(
+          `UPDATE gst_check_quota 
+         SET status = 1
+         WHERE id IN (?)`,
+          [ids],
+        );
+      }
+
+      await connection.commit();
+      return rows;
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
   }
 
   // Insert data ke gst_log_check_kuota
