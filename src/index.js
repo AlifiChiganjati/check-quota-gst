@@ -6,7 +6,7 @@ async function run(interfaceName, consoleId) {
     const argConsole = consoleId ? parseInt(consoleId, 10) : null;
 
     if (mod.default && typeof mod.default === "function") {
-      await mod.default(argConsole); // jalankan interface
+      await mod.default(argConsole);
     } else {
       console.error(
         `❌ Interface "${interfaceName}" tidak punya export default function`,
@@ -20,11 +20,9 @@ async function run(interfaceName, consoleId) {
 const interfaceName = process.argv[2];
 const consoleId = process.argv[3];
 
-// Kalau user kasih argumen → langsung jalan
 if (interfaceName) {
   run(interfaceName, consoleId);
 } else {
-  // Kalau kosong → mode interaktif
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,

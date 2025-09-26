@@ -2,7 +2,7 @@ import CheckService from "../services/check.service.js";
 import cron from "node-cron";
 import dns from "dns/promises";
 
-// Fungsi cek koneksi internet
+// Cek koneksi internet
 const isInternetAvailable = async () => {
   try {
     await dns.lookup("google.com");
@@ -12,7 +12,7 @@ const isInternetAvailable = async () => {
   }
 };
 
-// Fungsi update status GST (misal jam 22:00)
+// Update status
 const runUpdate = async () => {
   let internet = await isInternetAvailable();
   while (!internet) {
@@ -30,15 +30,21 @@ const runUpdate = async () => {
   }
 };
 
-// Cron job: update status jam 23:00 lokal Makassar
-cron.schedule(
-  "0 23 * * *",
-  () => {
-    console.log(
-      "Cron job update status dijalankan:",
-      new Date().toLocaleString(),
-    );
-    runUpdate();
-  },
-  { timezone: "Asia/Makassar" },
-);
+// ✅ export default → supaya bisa dipanggil dari loader
+export default async function cronUpdate() {
+  console.log("▶️ Menjalankan cron_update...");
+
+  cron.schedule(
+    "0 1 * * *",
+    () => {
+      console.log(
+        "⏰ Cron job update status dijalankan:",
+        new Date().toLocaleString(),
+      );
+      runUpdate();
+    },
+    { timezone: "Asia/Makassar" },
+  );
+
+  console.log("✅ Cron job sudah dipasang (01:00 WITA setiap hari).");
+}
