@@ -32,7 +32,7 @@ const check = async (consoleId) => {
       const checked = await CheckService.checkAllUrls(urls);
       console.log(`Batch ${urls.length} selesai dicek`);
 
-      await CheckService.insertDB(checked, consoleId);
+      await CheckService.insertDB(checked);
       console.log("Insert batch selesai, lanjut batch berikutnya jika ada...");
     } catch (err) {
       console.error("Error saat check atau insert:", err.message);

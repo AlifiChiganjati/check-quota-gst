@@ -146,7 +146,7 @@ export default class CheckService {
     return results;
   }
 
-  static async insertDB(results, consoleId) {
+  static async insertDB(results) {
     console.log("start insert log");
 
     const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
