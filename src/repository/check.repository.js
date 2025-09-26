@@ -1,7 +1,7 @@
 import db from "../config/db.js";
 
 export default class CheckRepository {
-  static async getAllUrl() {
+  static async getAllUrl(consoleId) {
     const connection = await db.getConnection(); // pastikan pool support getConnection()
     try {
       await connection.beginTransaction();
@@ -11,9 +11,11 @@ export default class CheckRepository {
         `SELECT id, url_check, date_check, status
        FROM gst_check_quota
        WHERE status = 0
+       AND console=?
        ORDER BY RAND()
        LIMIT 5
        FOR UPDATE`,
+        [consoleId],
       );
 
       if (rows.length > 0) {
@@ -48,13 +50,15 @@ export default class CheckRepository {
       status,
       status_paket,
       kuota,
+      check_gst_id,
+      date,
     } = data;
 
     const sql = `
-      INSERT INTO gst_log_check_quota
-      (sn, msisdn, masa_tunggu_kartu, value_check, date_check, status, status_paket, kuota)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `;
+  INSERT INTO gst_log_check_quota
+  (sn, msisdn, masa_tunggu_kartu, value_check, date_check, status, status_paket, kuota, check_gst_id, date)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`; // <--- 10 placeholder
 
     const values = [
       sn,
@@ -65,17 +69,19 @@ export default class CheckRepository {
       status,
       status_paket,
       kuota,
+      check_gst_id,
+      date,
     ];
 
     return await db.execute(sql, values);
   }
 
-  static async isAlreadyLoggedToday(sn, msisdn) {
+  static async isAlreadyInserted(check_gst_id, date) {
     const [rows] = await db.query(
       `SELECT 1 FROM gst_log_check_quota 
-     WHERE sn = ? AND msisdn = ? 
-       AND DATE(date_check) = CURDATE()`,
-      [sn, msisdn],
+     WHERE check_gst_id = ? AND date = ? 
+     LIMIT 1`,
+      [check_gst_id, date],
     );
     return rows.length > 0;
   }

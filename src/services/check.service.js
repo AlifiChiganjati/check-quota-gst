@@ -4,8 +4,8 @@ import axios from "axios";
 import db from "../config/db.js";
 
 export default class CheckService {
-  static async listUrls() {
-    return await CheckRepository.getAllUrl();
+  static async listUrls(consoleId) {
+    return await CheckRepository.getAllUrl(consoleId);
   }
 
   static async checkAllUrls(urls) {
@@ -146,16 +146,16 @@ export default class CheckService {
     return results;
   }
 
-  static async insertDB(results) {
+  static async insertDB(results, consoleId) {
     console.log("start insert log");
 
     const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const BATCH_SIZE = 5;
+    const today = new Date().toISOString().slice(0, 10);
 
     for (let i = 0; i < results.length; i += BATCH_SIZE) {
       const batch = results.slice(i, i + BATCH_SIZE);
 
-      // Insert setiap batch
       await Promise.all(
         batch.map(async (data) => {
           const payload = {
@@ -167,40 +167,41 @@ export default class CheckService {
             status: data.masaTunggu.status,
             status_paket: data.statusPaket,
             kuota: data.kuota,
+            check_gst_id: data.id,
+            date: today,
           };
 
           try {
-            const alreadyLogged = await CheckRepository.isAlreadyLoggedToday(
-              payload.sn,
-              payload.msisdn,
+            const alreadyInserted = await CheckRepository.isAlreadyInserted(
+              payload.check_gst_id,
+              payload.date,
             );
 
-            if (!alreadyLogged) {
+            if (!alreadyInserted) {
               await CheckRepository.insert(payload);
               await db.query(
-                `UPDATE gst_check_quota SET status = 4 WHERE url_check = ?`,
-                [data.url],
+                `UPDATE gst_check_quota SET status = 4 WHERE id = ?`,
+                [data.id],
               );
             } else {
               console.log(
-                `Data ${payload.sn} sudah di-log hari ini, skip insert`,
+                `Data id=${payload.check_gst_id} untuk tanggal ${payload.date} sudah ada, skip insert`,
               );
               await db.query(
-                `UPDATE gst_check_quota SET status = 3 WHERE url_check = ?`,
-                [data.url],
+                `UPDATE gst_check_quota SET status = 3 WHERE id = ?`,
+                [data.id],
               );
             }
           } catch (err) {
             console.error(`Gagal insert ${payload.sn}:`, err.message);
             await db.query(
-              `UPDATE gst_check_quota SET status = 2 WHERE url_check = ?`,
-              [data.url],
+              `UPDATE gst_check_quota SET status = 2 WHERE id = ?`,
+              [data.id],
             );
           }
         }),
       );
 
-      // Delay 1 detik setelah insert batch 5 data
       if (i + BATCH_SIZE < results.length) {
         await delay(1000);
       }

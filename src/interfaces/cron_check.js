@@ -14,8 +14,7 @@ const isInternetAvailable = async () => {
   }
 };
 
-// Fungsi untuk proses semua data batch 5 sampai habis
-const runCheck = async () => {
+const runCheck = async (consoleId) => {
   console.log("Mulai proses check:", new Date().toLocaleString());
 
   while (true) {
@@ -25,60 +24,27 @@ const runCheck = async () => {
       await new Promise((r) => setTimeout(r, 10000));
       internet = await isInternetAvailable();
     }
+
     try {
-      // Ambil batch 5 data dengan status 0
-      const urls = await CheckRepository.getAllUrl();
+      const urls = await CheckRepository.getAllUrl(consoleId);
       if (!urls.length) {
         console.log("Semua data hari ini sudah di-log, proses selesai");
-        break; // berhenti loop
+        break;
       }
 
-      // checkAllUrls sudah otomatis ambil data dari repository
       const checked = await CheckService.checkAllUrls(urls);
       console.log(`Batch ${urls.length} selesai dicek`);
 
-      await CheckService.insertDB(checked);
+      await CheckService.insertDB(checked, consoleId);
       console.log("Insert batch selesai, lanjut batch berikutnya jika ada...");
     } catch (err) {
       console.error("Error saat check atau insert:", err.message);
-      // tunggu 5 detik sebelum retry
       await new Promise((r) => setTimeout(r, 5000));
     }
   }
 
   console.log("Proses check semua data selesai:", new Date().toLocaleString());
 };
-
-// Fungsi update status GST (misal jam 22:00)
-const runUpdate = async () => {
-  let internet = await isInternetAvailable();
-  while (!internet) {
-    console.log("Internet mati, menunggu 10 detik...");
-    await new Promise((r) => setTimeout(r, 10000));
-    internet = await isInternetAvailable();
-  }
-
-  try {
-    console.log("Memulai update status GST...");
-    const updated = await CheckService.updateStatus();
-    console.log(`Update selesai, baris terpengaruh: ${updated.affectedRows}`);
-  } catch (err) {
-    console.error("Error saat update status:", err.message);
-  }
-};
-
-// Cron job: update status jam 23:00 lokal Makassar
-cron.schedule(
-  "0 23 * * *",
-  () => {
-    console.log(
-      "Cron job update status dijalankan:",
-      new Date().toLocaleString(),
-    );
-    runUpdate();
-  },
-  { timezone: "Asia/Makassar" },
-);
 
 // Cron job: check dan insert data jam 01:00 lokal Makassar
 cron.schedule(
