@@ -96,7 +96,9 @@ export default class CheckService {
           ? masaTungguItem.find(".title").text().trim() // "Masa Tunggu Kartu"
           : pendingItem.find(".title").text().trim(); // "Pending Paket"
         // Cara 1: pakai regex
-        const match = kuotaPending.match(/\d+\s*GB/);
+        const match = kuotaPending?.match(/\d+\s*GB/);
+        const kuotaValue = match ? match[0] : null;
+
         // Push result bergantung Value Section
         const sisa_kuota =
           parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
@@ -136,7 +138,7 @@ export default class CheckService {
               kuota_pending: kuotaPending,
               redeem_pending: redeemPending,
             },
-            kuota: match[0],
+            kuota: kuotaValue,
           });
         }
       } catch (err) {
@@ -163,21 +165,21 @@ export default class CheckService {
       await Promise.all(
         batch.map(async (data) => {
           const payload = {
-            sn: data.serialNumber,
-            msisdn: data.phoneNumber,
-            masa_tunggu_kartu: data.masaTunggu.tanggal,
-            value_check: data.value,
+            sn: data.serialNumber || null,
+            msisdn: data.phoneNumber || null,
+            masa_tunggu_kartu: data.masaTunggu?.tanggal || null,
+            value_check: data.value || null,
             date_check: new Date(),
-            status: data.masaTunggu.status,
-            status_paket: data.statusPaket,
-            kuota: data.kuota,
+            status: data.masaTunggu?.status || null,
+            status_paket: data.statusPaket || null,
+            kuota: data.kuota || null,
             check_quota_id: data.id,
             date: today,
           };
 
           try {
             const alreadyInserted = await CheckRepository.isAlreadyInserted(
-              payload.check_gst_id,
+              payload.check_quota_id,
               payload.date,
             );
 
@@ -189,7 +191,7 @@ export default class CheckService {
               );
             } else {
               console.log(
-                `Data id=${payload.check_gst_id} untuk tanggal ${payload.date} sudah ada, skip insert`,
+                `Data id=${payload.check_quota_id} untuk tanggal ${payload.date} sudah ada, skip insert`,
               );
               await db.query(
                 `UPDATE gst_check_quota SET status = 3 WHERE id = ?`,
