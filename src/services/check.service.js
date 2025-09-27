@@ -1,7 +1,9 @@
+//service
 import CheckRepository from "../repository/check.repository.js";
 import * as cheerio from "cheerio";
 import axios from "axios";
 import db from "../config/db.js";
+import { normalize } from "../utils/normalize.js";
 
 export default class CheckService {
   static async listUrls(consoleId) {
@@ -13,7 +15,7 @@ export default class CheckService {
   static async checkAllUrls(urls) {
     const results = [];
 
-    for (const { id, url_check } of urls) {
+    for (const { id, url_check, sn, msisdn } of urls) {
       try {
         const response = await axios.get(url_check, {
           headers: {
@@ -106,6 +108,8 @@ export default class CheckService {
         if (masaWaktu) {
           results.push({
             id,
+            sn,
+            msisdn,
             url: url_check,
             serialNumber,
             phoneNumber,
@@ -126,6 +130,8 @@ export default class CheckService {
         } else {
           results.push({
             id,
+            sn,
+            msisdn,
             url: url_check,
             serialNumber,
             phoneNumber,
@@ -165,18 +171,24 @@ export default class CheckService {
       await Promise.all(
         batch.map(async (data) => {
           const payload = {
-            sn: data.serialNumber || null,
-            msisdn: data.phoneNumber || null,
-            masa_tunggu_kartu: data.masaTunggu?.tanggal || null,
-            value_check: data.value || null,
+            sn: normalize(data.serialNumber, data.sn),
+            msisdn: normalize(data.phoneNumber, data.msisdn),
+            masa_tunggu_kartu: normalize(data.masaTunggu?.tanggal, ""),
+            value_check:
+              data.value && Object.values(data.value).some((v) => v)
+                ? data.value
+                : {
+                    message: "coba periksa url",
+                    sn: data.sn,
+                    msisdn: data.msisdn,
+                  },
             date_check: new Date(),
-            status: data.masaTunggu?.status || null,
-            status_paket: data.statusPaket || null,
-            kuota: data.kuota || null,
+            status: normalize(data.masaTunggu?.status, ""),
+            status_paket: normalize(data.statusPaket, ""),
+            kuota: normalize(data.kuota, "0 GB"),
             check_quota_id: data.id,
             date: today,
           };
-
           try {
             const alreadyInserted = await CheckRepository.isAlreadyInserted(
               payload.check_quota_id,

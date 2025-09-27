@@ -8,7 +8,7 @@ export default class CheckRepository {
 
       // Ambil 5 data dengan kunci row
       const [rows] = await connection.query(
-        `SELECT id, url_check, date_check, status
+        `SELECT id, url_check, date_check, status, sn, msisdn
        FROM gst_check_quota
        WHERE status = 0
        AND console=?
