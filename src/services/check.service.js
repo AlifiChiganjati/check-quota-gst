@@ -5,13 +5,15 @@ import db from "../config/db.js";
 
 export default class CheckService {
   static async listUrls(consoleId) {
-    return await CheckRepository.getAllUrl(consoleId);
+    const result = await CheckRepository.getAllUrl(consoleId);
+    console.log(result);
+    return result;
   }
 
   static async checkAllUrls(urls) {
     const results = [];
 
-    for (const { url_check } of urls) {
+    for (const { id, url_check } of urls) {
       try {
         const response = await axios.get(url_check, {
           headers: {
@@ -101,6 +103,7 @@ export default class CheckService {
 
         if (masaWaktu) {
           results.push({
+            id,
             url: url_check,
             serialNumber,
             phoneNumber,
@@ -120,6 +123,7 @@ export default class CheckService {
           });
         } else {
           results.push({
+            id,
             url: url_check,
             serialNumber,
             phoneNumber,
@@ -167,7 +171,7 @@ export default class CheckService {
             status: data.masaTunggu.status,
             status_paket: data.statusPaket,
             kuota: data.kuota,
-            check_gst_id: data.id,
+            check_quota_id: data.id,
             date: today,
           };
 

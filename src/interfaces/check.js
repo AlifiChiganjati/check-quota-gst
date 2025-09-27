@@ -1,3 +1,4 @@
+// interfaces/check.js
 import CheckService from "../services/check.service.js";
 import CheckRepository from "../repository/check.repository.js";
 import dns from "dns/promises";
@@ -23,20 +24,25 @@ const check = async (consoleId) => {
     }
 
     try {
+      console.log("Ambil URL dari DB...");
       const urls = await CheckRepository.getAllUrl(consoleId);
+
+      console.log("Jumlah URL:", urls.length);
       if (!urls.length) {
         console.log("Semua data hari ini sudah di-log, proses selesai");
         break;
       }
 
+      console.log("Cek semua URL...");
       const checked = await CheckService.checkAllUrls(urls);
-      console.log(`Batch ${urls.length} selesai dicek`);
 
+      console.log("Insert ke DB...");
       await CheckService.insertDB(checked);
+
       console.log("Insert batch selesai, lanjut batch berikutnya jika ada...");
     } catch (err) {
-      console.error("Error saat check atau insert:", err.message);
-      // tunggu sebentar biar ga spam kalau error
+      console.error("❌ Error saat step check/insert:", err);
+      console.error("Stack trace:", err?.stack);
       await new Promise((r) => setTimeout(r, 10000));
     }
   }
@@ -45,7 +51,6 @@ const check = async (consoleId) => {
 };
 
 const runCheck = async (consoleId) => {
-  // cek internet dulu sebelum mulai proses
   let internet = await isInternetAvailable();
   while (!internet) {
     console.log("Internet mati sebelum runCheck, menunggu 10 detik...");
@@ -59,6 +64,4 @@ const runCheck = async (consoleId) => {
   setTimeout(() => runCheck(consoleId), 5 * 60 * 1000);
 };
 
-// ambil consoleId dari argumen CLI, default null
-const consoleId = process.argv[2] ? parseInt(process.argv[2], 10) : null;
-runCheck(consoleId);
+export default runCheck;

@@ -50,13 +50,13 @@ export default class CheckRepository {
       status,
       status_paket,
       kuota,
-      check_gst_id,
+      check_quota_id,
       date,
     } = data;
 
     const sql = `
   INSERT INTO gst_log_check_quota
-  (sn, msisdn, masa_tunggu_kartu, value_check, date_check, status, status_paket, kuota, check_gst_id, date)
+  (sn, msisdn, masa_tunggu_kartu, value_check, date_check, status, status_paket, kuota, check_quota_id, date)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `; // <--- 10 placeholder
 
@@ -69,7 +69,7 @@ export default class CheckRepository {
       status,
       status_paket,
       kuota,
-      check_gst_id,
+      check_quota_id,
       date,
     ];
 
@@ -79,7 +79,7 @@ export default class CheckRepository {
   static async isAlreadyInserted(check_gst_id, date) {
     const [rows] = await db.query(
       `SELECT 1 FROM gst_log_check_quota 
-     WHERE check_gst_id = ? AND date = ? 
+     WHERE check_quota_id = ? AND date = ? 
      LIMIT 1`,
       [check_gst_id, date],
     );
