@@ -30,6 +30,9 @@ const check = async (consoleId) => {
       console.log("Jumlah URL:", urls.length);
       if (!urls.length) {
         console.log("Semua data hari ini sudah di-log, proses selesai");
+
+        // 🔹 Reset status 1 yang nyangkut sebelum break
+        await CheckRepository.resetStuck();
         break;
       }
 

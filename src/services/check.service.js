@@ -163,8 +163,8 @@ export default class CheckService {
 
     const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const BATCH_SIZE = 5;
-    const today = new Date().toISOString().slice(0, 10);
-
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     for (let i = 0; i < results.length; i += BATCH_SIZE) {
       const batch = results.slice(i, i + BATCH_SIZE);
 

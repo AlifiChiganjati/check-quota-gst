@@ -98,4 +98,20 @@ export default class CheckRepository {
       throw err;
     }
   }
+
+  // repository/check.repository.js
+  static async resetStuck() {
+    try {
+      const [result] = await db.query(
+        `UPDATE gst_check_quota 
+       SET status = 0 
+       WHERE status = 1`,
+      );
+      console.log(`Reset status=1 -> 0: ${result.affectedRows} row`);
+      return result;
+    } catch (err) {
+      console.error("Error resetStuck:", err);
+      throw err;
+    }
+  }
 }
