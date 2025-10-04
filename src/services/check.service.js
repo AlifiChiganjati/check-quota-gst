@@ -8,7 +8,6 @@ import { normalize } from "../utils/normalize.js";
 export default class CheckService {
   static async listUrls(consoleId) {
     const result = await CheckRepository.getAllUrl(consoleId);
-    console.log(result);
     return result;
   }
 
@@ -175,7 +174,7 @@ export default class CheckService {
             msisdn: normalize(data.phoneNumber, data.msisdn),
             masa_tunggu_kartu: normalize(data.masaTunggu?.tanggal, ""),
             value_check:
-              data.value && Object.values(data.value).some((v) => v)
+              data.value && Object.keys(data.value).length > 0
                 ? data.value
                 : {
                     message: "coba periksa url",
