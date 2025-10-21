@@ -230,13 +230,28 @@ export default class CheckService {
 
             if (!alreadyInserted) {
               await CheckRepository.insert(payload);
-              await db.query(
-                `UPDATE gst_check_quota SET status = 4 WHERE id = ?`,
-                [data.id],
-              );
+
+              // 🔹 Cek apakah hasil scraping error
+              if (data.statusPaket === "Error") {
+                await db.query(
+                  `UPDATE gst_check_quota SET status = 2 WHERE id = ?`,
+                  [data.id],
+                );
+                console.warn(
+                  `❌ Gagal scraping untuk SN=${payload.sn}, ID=${data.id}`,
+                );
+              } else {
+                await db.query(
+                  `UPDATE gst_check_quota SET status = 4 WHERE id = ?`,
+                  [data.id],
+                );
+                console.log(
+                  `✅ Berhasil insert SN=${payload.sn}, ID=${data.id}`,
+                );
+              }
             } else {
               console.log(
-                `Data id=${payload.check_quota_id} untuk tanggal ${payload.date} sudah ada, skip insert`,
+                `⚠️ Data id=${payload.check_quota_id} untuk tanggal ${payload.date} sudah ada, skip insert`,
               );
               await db.query(
                 `UPDATE gst_check_quota SET status = 3 WHERE id = ?`,
