@@ -13,7 +13,7 @@ export default class CheckRepository {
        WHERE status = 0
        AND console=?
        ORDER BY RAND()
-       LIMIT 5
+       LIMIT 10
        FOR UPDATE`,
         [consoleId],
       );
