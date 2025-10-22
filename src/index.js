@@ -17,21 +17,46 @@ async function run(interfaceName, consoleId) {
   }
 }
 
-const interfaceName = process.argv[2];
-const consoleId = process.argv[3];
+function showMenu() {
+  console.log("=====================================");
+  console.log("   🔧 PILIH MODE EKSEKUSI PROGRAM");
+  console.log("=====================================");
+  console.log("  0. Jalankan cron_update (update otomatis harian)");
+  for (let i = 1; i <= 12; i++) {
+    console.log(`  ${i}. Jalankan check consoleId = ${i}`);
+  }
+  console.log("=====================================");
+}
 
-if (interfaceName) {
-  run(interfaceName, consoleId);
-} else {
+function startCLI() {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
-  rl.question("Masukkan nama interface (check / cron_update): ", (iname) => {
-    rl.question("Masukkan consoleId: ", (cid) => {
-      run(iname, cid);
+  showMenu();
+
+  rl.question("Masukkan pilihan (0–12): ", async (answer) => {
+    const choice = parseInt(answer.trim(), 10);
+
+    if (isNaN(choice) || choice < 0 || choice > 12) {
+      console.log(
+        "⚠️ Pilihan tidak valid! Masukkan angka antara 0–12 ya~ (/'3')/",
+      );
       rl.close();
-    });
+      return;
+    }
+
+    if (choice === 0) {
+      console.log("▶️ Menjalankan cron_update...");
+      await run("cron_update");
+    } else {
+      console.log(`▶️ Menjalankan check dengan consoleId=${choice}...`);
+      await run("check", choice);
+    }
+
+    rl.close();
   });
 }
+
+startCLI();
