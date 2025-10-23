@@ -4,6 +4,7 @@ import * as cheerio from "cheerio";
 import axios from "axios";
 import db from "../config/db.js";
 import { normalize } from "../utils/normalize.js";
+import pLimit from "p-limit";
 
 export default class CheckService {
   static async listUrls(consoleId) {
@@ -13,164 +14,174 @@ export default class CheckService {
 
   static async checkAllUrls(urls) {
     const results = [];
-
-    for (const { id, url_check, sn, msisdn } of urls) {
-      try {
-        const response = await axios.get(url_check, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Node.js Scraper)",
-          },
-        });
-
-        const $ = cheerio.load(response.data);
-        const parseGB = (str) => {
-          if (!str) return 0;
-          const match = str.match(/(\d+)/);
-          return match ? parseInt(match[1], 10) : 0;
-        };
-        // helper untuk title exact
-        const getExactValueByTitle = (title) => {
-          const item = $(".info-item").filter((_, el) => {
-            return $(el).find(".title").text().trim() === title;
+    const limit = pLimit(5);
+    const fetchWithRetry = async (url, retries = 3) => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          return await axios.get(url, {
+            headers: { "User-Agent": "Mozilla/5.0 (Node.js Scraper)" },
+            timeout: 10000,
           });
-          return item.find(".single-value").text().trim();
-        };
-
-        // ambil serial number & phone
-        const serialNumber = getExactValueByTitle("Serial Number");
-        const phoneNumber = getExactValueByTitle("Number");
-
-        // Ambil Masa Tunggu Kartu
-        const masaTungguItem = $(".info-item").filter(
-          (_, el) => $(el).find(".title").text().trim() === "Masa Tunggu Kartu",
-        );
-        const tanggalMasaTunggu = masaTungguItem.find(".date").text().trim();
-        const statusMasaTunggu = masaTungguItem
-          .find(".date-desc")
-          .text()
-          .trim();
-
-        // Ambil Pending Paket
-        const pendingItem = $(".info-item").filter(
-          (_, el) => $(el).find(".title").text().trim() === "Pending Paket",
-        );
-
-        // Value Section
-        const valueItem = $(".info-item").filter(
-          (_, el) => $(el).find(".title").text().trim() === "Value",
-        );
-
-        const getValueRow = (rowTitle) => {
-          return valueItem
-            .find("tr")
-            .filter(
-              (_, el) =>
-                $(el).find("td.other-title").text().trim() === rowTitle,
-            )
-            .find("td.other-value")
-            .text()
-            .trim();
-        };
-
-        const masaWaktu = getValueRow("Masa Waktu");
-        const kuotaNasional = getValueRow("Kuota Nasional");
-        const kuotaLokal = getValueRow("Kuota Lokal");
-        const lainnya = getValueRow("Lainnya");
-        const masaTungguPaket = getValueRow("Masa Tunggu Paket");
-
-        // Pending Paket rows
-        const getPendingRow = (rowTitle) => {
-          return pendingItem
-            .find("tr")
-            .filter(
-              (_, el) =>
-                $(el).find("td.other-title").text().trim() === rowTitle,
-            )
-            .find("td.other-value")
-            .text()
-            .trim();
-        };
-        const kuotaPending = getPendingRow("Kuota");
-        const redeemPending = getPendingRow("Dapat di redeem hingga");
-        // Ambil status paket dari Pending Paket
-        const statusPaket = masaWaktu
-          ? masaTungguItem.find(".title").text().trim() // "Masa Tunggu Kartu"
-          : pendingItem.find(".title").text().trim(); // "Pending Paket"
-        // Cara 1: pakai regex
-        const match = kuotaPending?.match(/\d+\s*GB/);
-        const kuotaValue = match ? match[0] : null;
-
-        // Push result bergantung Value Section
-        const sisa_kuota =
-          parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
-
-        if (masaWaktu) {
-          results.push({
-            id,
-            sn,
-            msisdn,
-            url: url_check,
-            serialNumber,
-            phoneNumber,
-            masaTunggu: {
-              tanggal: tanggalMasaTunggu,
-              status: statusMasaTunggu,
-            },
-            statusPaket,
-            value: {
-              masa_waktu: masaWaktu,
-              kuota_nasional: kuotaNasional,
-              kuota_local: kuotaLokal,
-              kuota_lainnya: lainnya,
-              masa_tunggu_paket: masaTungguPaket,
-            },
-            kuota: `${sisa_kuota} GB`,
-          });
-        } else {
-          results.push({
-            id,
-            sn,
-            msisdn,
-            url: url_check,
-            serialNumber,
-            phoneNumber,
-            masaTunggu: {
-              tanggal: tanggalMasaTunggu,
-              status: statusMasaTunggu,
-            },
-            statusPaket,
-            value: {
-              kuota_pending: kuotaPending,
-              redeem_pending: redeemPending,
-            },
-            kuota: kuotaValue,
-          });
+        } catch (err) {
+          if (i === retries - 1) throw err;
+          console.warn(`Retry ${i + 1} untuk ${url}...`);
+          await new Promise((r) => setTimeout(r, 2000));
         }
-      } catch (err) {
-        results.push({
-          id,
-          sn,
-          msisdn,
-          url: url_check,
-          serialNumber: null,
-          phoneNumber: null,
-          masaTunggu: {
-            tanggal: null,
-            status: "Gagal akses URL",
-          },
-          statusPaket: "Error",
-          value: {
-            message: err.message || "Gagal ambil data",
-            statusCode: err.response?.status || null,
-          },
-          kuota: "0 GB",
-        });
       }
-    }
+    };
+    const tasks = urls.map(({ id, url_check, sn, msisdn }) =>
+      limit(async () => {
+        try {
+          const response = await fetchWithRetry(url_check);
+          const $ = cheerio.load(response.data);
+
+          const parseGB = (str) => {
+            if (!str) return 0;
+            const match = str.match(/(\d+)/);
+            return match ? parseInt(match[1], 10) : 0;
+          };
+
+          const getExactValueByTitle = (title) => {
+            const item = $(".info-item").filter((_, el) =>
+              $(el)
+                .find(".title")
+                .text()
+                .trim()
+                .toLowerCase()
+                .includes(title.toLowerCase()),
+            );
+            return item.find(".single-value").text().trim();
+          };
+
+          const serialNumber = getExactValueByTitle("Serial Number");
+          const phoneNumber = getExactValueByTitle("Number");
+
+          const masaTungguItem = $(".info-item").filter(
+            (_, el) =>
+              $(el).find(".title").text().trim() === "Masa Tunggu Kartu",
+          );
+          const tanggalMasaTunggu = masaTungguItem.find(".date").text().trim();
+          const statusMasaTunggu = masaTungguItem
+            .find(".date-desc")
+            .text()
+            .trim();
+
+          const pendingItem = $(".info-item").filter(
+            (_, el) => $(el).find(".title").text().trim() === "Pending Paket",
+          );
+
+          const valueItem = $(".info-item").filter(
+            (_, el) => $(el).find(".title").text().trim() === "Value",
+          );
+
+          const getValueRow = (rowTitle) =>
+            valueItem
+              .find("tr")
+              .filter(
+                (_, el) =>
+                  $(el).find("td.other-title").text().trim() === rowTitle,
+              )
+              .find("td.other-value")
+              .text()
+              .trim();
+
+          const masaWaktu = getValueRow("Masa Waktu");
+          const kuotaNasional = getValueRow("Kuota Nasional");
+          const kuotaLokal = getValueRow("Kuota Lokal");
+          const lainnya = getValueRow("Lainnya");
+          const masaTungguPaket = getValueRow("Masa Tunggu Paket");
+
+          const getPendingRow = (rowTitle) =>
+            pendingItem
+              .find("tr")
+              .filter(
+                (_, el) =>
+                  $(el).find("td.other-title").text().trim() === rowTitle,
+              )
+              .find("td.other-value")
+              .text()
+              .trim();
+
+          const kuotaPending = getPendingRow("Kuota");
+          const redeemPending = getPendingRow("Dapat di redeem hingga");
+
+          const match = kuotaPending?.match(/\d+\s*GB/);
+          const kuotaValue = match ? match[0] : null;
+          const sisa_kuota =
+            parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
+
+          const statusPaket = masaWaktu ? "Value" : "Pending Paket";
+
+          if (masaWaktu) {
+            return {
+              id,
+              sn,
+              msisdn,
+              url: url_check,
+              serialNumber,
+              phoneNumber,
+              masaTunggu: {
+                tanggal: tanggalMasaTunggu,
+                status: statusMasaTunggu,
+              },
+              statusPaket,
+              value: {
+                masa_waktu: masaWaktu,
+                kuota_nasional: kuotaNasional,
+                kuota_local: kuotaLokal,
+                kuota_lainnya: lainnya,
+                masa_tunggu_paket: masaTungguPaket,
+              },
+              kuota: `${sisa_kuota} GB`,
+            };
+          } else {
+            return {
+              id,
+              sn,
+              msisdn,
+              url: url_check,
+              serialNumber,
+              phoneNumber,
+              masaTunggu: {
+                tanggal: tanggalMasaTunggu,
+                status: statusMasaTunggu,
+              },
+              statusPaket,
+              value: {
+                kuota_pending: kuotaPending,
+                redeem_pending: redeemPending,
+              },
+              kuota: kuotaValue,
+            };
+          }
+        } catch (err) {
+          return {
+            id,
+            sn,
+            msisdn,
+            url: url_check,
+            serialNumber: null,
+            phoneNumber: null,
+            masaTunggu: {
+              tanggal: null,
+              status: "Gagal akses URL",
+            },
+            statusPaket: "Error",
+            value: {
+              message: err.message || "Gagal ambil data",
+              statusCode: err.response?.status || null,
+            },
+            kuota: "0 GB",
+          };
+        }
+      }),
+    );
+
+    const settled = await Promise.all(tasks);
+    results.push(...settled);
 
     return results;
   }
-
   static async insertDB(results) {
     console.log("start insert log");
 

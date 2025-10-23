@@ -12,7 +12,7 @@ export default class CheckRepository {
        FROM gst_check_quota
        WHERE status = 0
        AND console=?
-       ORDER BY RAND()
+       ORDER BY id ASC
        LIMIT 10
        FOR UPDATE`,
         [consoleId],
