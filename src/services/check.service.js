@@ -42,15 +42,12 @@ export default class CheckService {
           };
 
           const getExactValueByTitle = (title) => {
-            const item = $(".info-item").filter((_, el) =>
-              $(el)
-                .find(".title")
-                .text()
-                .trim()
-                .toLowerCase()
-                .includes(title.toLowerCase()),
+            const item = $(".info-item").filter(
+              (_, el) =>
+                $(el).find(".title").text().trim().toLowerCase() ===
+                title.toLowerCase(),
             );
-            return item.find(".single-value").text().trim();
+            return item.find(".single-value").text().trim() || null;
           };
 
           const serialNumber = getExactValueByTitle("Serial Number");
@@ -105,8 +102,13 @@ export default class CheckService {
           const kuotaPending = getPendingRow("Kuota");
           const redeemPending = getPendingRow("Dapat di redeem hingga");
 
-          const match = kuotaPending?.match(/\d+\s*GB/);
-          const kuotaValue = match ? match[0] : null;
+          let kuotaValue = 0;
+
+          if (kuotaPending && !kuotaPending.includes("InternetMAX")) {
+            const match = kuotaPending.match(/\d+\s*GB/);
+            kuotaValue = match ? match[0] : 0;
+          }
+
           const sisa_kuota =
             parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
 
@@ -298,5 +300,70 @@ export default class CheckService {
       console.error("Error saat update status:", err);
       throw err;
     }
+  }
+
+  // Tambahan di CheckService
+  static async updateIncompleteLogs() {
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    console.log(`🔍 Mencari log tidak lengkap untuk tanggal ${today}...`);
+
+    const incompleteLogs = await CheckRepository.getIncompleteLogs(today);
+
+    if (!incompleteLogs.length) {
+      console.log("✅ Tidak ada log yang perlu diperbarui");
+      return;
+    }
+
+    console.log(`Ditemukan ${incompleteLogs.length} log yang belum lengkap`);
+
+    for (const { check_quota_id } of incompleteLogs) {
+      try {
+        // Ambil ulang data dari sumber asli gst_check_quota
+        const [rows] = await db.query(
+          `SELECT id, url_check, sn, msisdn 
+         FROM gst_check_quota 
+         WHERE id = ?`,
+          [check_quota_id],
+        );
+
+        if (!rows.length) {
+          console.warn(
+            `⚠️ Data id=${check_quota_id} tidak ditemukan di gst_check_quota`,
+          );
+          continue;
+        }
+
+        const { id, url_check, sn, msisdn } = rows[0];
+        console.log(`🔁 Recheck ID=${id} URL=${url_check}`);
+
+        const checked = await CheckService.checkAllUrls([
+          { id, url_check, sn, msisdn },
+        ]);
+        const result = checked[0];
+
+        // Siapkan payload update
+        const payload = {
+          check_quota_id: id,
+          sn: result.sn,
+          msisdn: result.msisdn,
+          masa_tunggu_kartu: result.masaTunggu?.tanggal || null,
+          value_check: result.value,
+          date_check: new Date(),
+          status: result.masaTunggu?.status || null,
+          status_paket: result.statusPaket,
+          kuota: result.kuota,
+          date: today,
+        };
+
+        await CheckRepository.updateLogByCheckQuotaId(payload);
+        console.log(`✅ Log ID=${id} berhasil diperbarui`);
+      } catch (err) {
+        console.error(`❌ Gagal update log ID=${check_quota_id}:`, err.message);
+      }
+    }
+
+    console.log("🔁 Update incomplete logs selesai ✅");
   }
 }

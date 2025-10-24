@@ -1,3 +1,4 @@
+//repository
 import db from "../config/db.js";
 
 export default class CheckRepository {
@@ -112,6 +113,87 @@ export default class CheckRepository {
     } catch (err) {
       console.error("Error resetStuck:", err);
       throw err;
+    }
+  }
+
+  static async getIncompleteLogs(date) {
+    const [rows] = await db.query(
+      `SELECT check_quota_id 
+       FROM gst_log_check_quota 
+       WHERE status_paket IS NULL 
+         AND masa_tunggu_kartu IS NULL 
+         AND date = ?`,
+      [date],
+    );
+    return rows;
+  }
+
+  // Update log berdasarkan check_quota_id (update semua kolom penting)
+  static async updateLogByCheckQuotaId(data) {
+    const {
+      check_quota_id,
+      sn,
+      msisdn,
+      masa_tunggu_kartu,
+      value_check,
+      date_check,
+      status,
+      status_paket,
+      kuota,
+      date,
+    } = data;
+
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // Kunci 1 baris spesifik berdasarkan check_quota_id
+      const [rows] = await connection.query(
+        `SELECT check_quota_id 
+       FROM gst_log_check_quota 
+       WHERE check_quota_id = ? 
+       FOR UPDATE`,
+        [check_quota_id],
+      );
+
+      if (rows.length === 0) {
+        await connection.rollback();
+        return null; // tidak ditemukan
+      }
+
+      await connection.query(
+        `UPDATE gst_log_check_quota
+       SET sn = ?, 
+           msisdn = ?, 
+           masa_tunggu_kartu = ?, 
+           value_check = ?, 
+           date_check = ?, 
+           status = ?, 
+           status_paket = ?, 
+           kuota = ?,
+           date = ?
+       WHERE check_quota_id = ?`,
+        [
+          sn,
+          msisdn,
+          masa_tunggu_kartu,
+          value_check,
+          date_check,
+          status,
+          status_paket,
+          kuota,
+          date,
+          check_quota_id,
+        ],
+      );
+
+      await connection.commit();
+      return { success: true };
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
     }
   }
 }
