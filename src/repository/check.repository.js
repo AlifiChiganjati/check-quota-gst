@@ -118,11 +118,12 @@ export default class CheckRepository {
 
   static async getIncompleteLogs(date) {
     const [rows] = await db.query(
-      `SELECT check_quota_id 
-       FROM gst_log_check_quota 
-       WHERE status_paket IS NULL 
-         AND masa_tunggu_kartu IS NULL 
-         AND date = ?`,
+      `SELECT check_quota_id
+     FROM gst_log_check_quota
+     WHERE (status IS NULL OR status = '')
+       AND (masa_tunggu_kartu IS NULL OR masa_tunggu_kartu = '')
+          AND status_paket != 'Error'
+       AND date = ?`,
       [date],
     );
     return rows;
@@ -177,7 +178,7 @@ export default class CheckRepository {
           sn,
           msisdn,
           masa_tunggu_kartu,
-          value_check,
+          JSON.stringify(value_check),
           date_check,
           status,
           status_paket,

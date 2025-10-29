@@ -53,9 +53,12 @@ const check = async (consoleId) => {
   console.log("Proses check semua data selesai:", new Date().toLocaleString());
 
   try {
-    await CheckService.updateIncompleteLogs();
+    await CheckService.updateIncompleteLogs(consoleId);
   } catch (err) {
-    console.error("❌ Gagal update incomplete logs:", err);
+    console.error(
+      `[Console ${consoleId}] ❌ Gagal update incomplete logs:`,
+      err,
+    );
   }
 };
 

@@ -303,67 +303,136 @@ export default class CheckService {
   }
 
   // Tambahan di CheckService
-  static async updateIncompleteLogs() {
+
+  static async updateIncompleteLogs(consoleId) {
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    console.log(
+      `🔍 [Console ${consoleId}] Cari log tidak lengkap (${today})...`,
+    );
 
-    console.log(`🔍 Mencari log tidak lengkap untuk tanggal ${today}...`);
-
-    const incompleteLogs = await CheckRepository.getIncompleteLogs(today);
+    const [incompleteLogs] = await db.query(
+      `SELECT l.check_quota_id
+     FROM gst_log_check_quota l
+     JOIN gst_check_quota qc ON qc.id = l.check_quota_id
+     WHERE (l.status IS NULL OR l.status = '')
+       AND (l.masa_tunggu_kartu IS NULL OR l.masa_tunggu_kartu = '')
+       AND l.status_paket != 'Error'
+       AND l.date = ?
+       AND qc.console = ?`,
+      [today, consoleId],
+    );
 
     if (!incompleteLogs.length) {
-      console.log("✅ Tidak ada log yang perlu diperbarui");
+      console.log(
+        `[Console ${consoleId}] ✅ Tidak ada log yang perlu diperbarui`,
+      );
       return;
     }
 
-    console.log(`Ditemukan ${incompleteLogs.length} log yang belum lengkap`);
+    console.log(
+      `[Console ${consoleId}] Ditemukan ${incompleteLogs.length} log belum lengkap`,
+    );
 
-    for (const { check_quota_id } of incompleteLogs) {
-      try {
-        // Ambil ulang data dari sumber asli gst_check_quota
-        const [rows] = await db.query(
-          `SELECT id, url_check, sn, msisdn 
-         FROM gst_check_quota 
-         WHERE id = ?`,
-          [check_quota_id],
-        );
+    const BATCH_SIZE = 10;
+    const CONCURRENCY = 5;
+    const limit = pLimit(CONCURRENCY);
+    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
-        if (!rows.length) {
-          console.warn(
-            `⚠️ Data id=${check_quota_id} tidak ditemukan di gst_check_quota`,
-          );
-          continue;
-        }
+    for (let i = 0; i < incompleteLogs.length; i += BATCH_SIZE) {
+      const batch = incompleteLogs.slice(i, i + BATCH_SIZE);
 
-        const { id, url_check, sn, msisdn } = rows[0];
-        console.log(`🔁 Recheck ID=${id} URL=${url_check}`);
+      console.log(
+        `[Console ${consoleId}] 🔁 Jalankan batch ${i / BATCH_SIZE + 1} (${batch.length} item)...`,
+      );
 
-        const checked = await CheckService.checkAllUrls([
-          { id, url_check, sn, msisdn },
-        ]);
-        const result = checked[0];
+      // Jalankan semua task dalam batch secara paralel (dengan concurrency limit)
+      const tasks = batch.map(({ check_quota_id }) =>
+        limit(async () => {
+          try {
+            const [rows] = await db.query(
+              `SELECT id, url_check, sn, msisdn 
+             FROM gst_check_quota 
+             WHERE id = ? AND console = ?`,
+              [check_quota_id, consoleId],
+            );
 
-        // Siapkan payload update
-        const payload = {
-          check_quota_id: id,
-          sn: result.sn,
-          msisdn: result.msisdn,
-          masa_tunggu_kartu: result.masaTunggu?.tanggal || null,
-          value_check: result.value,
-          date_check: new Date(),
-          status: result.masaTunggu?.status || null,
-          status_paket: result.statusPaket,
-          kuota: result.kuota,
-          date: today,
-        };
+            if (!rows.length) {
+              console.warn(
+                `[Console ${consoleId}] ⚠️ ID=${check_quota_id} tidak ditemukan`,
+              );
+              return;
+            }
 
-        await CheckRepository.updateLogByCheckQuotaId(payload);
-        console.log(`✅ Log ID=${id} berhasil diperbarui`);
-      } catch (err) {
-        console.error(`❌ Gagal update log ID=${check_quota_id}:`, err.message);
+            const { id, url_check, sn, msisdn } = rows[0];
+            console.log(
+              `[Console ${consoleId}] 🔁 Recheck ID=${id} URL=${url_check}`,
+            );
+
+            const [checked] = await CheckService.checkAllUrls([
+              { id, url_check, sn, msisdn },
+            ]);
+
+            const payload = {
+              check_quota_id: id,
+              sn: checked.sn,
+              msisdn: checked.msisdn,
+              masa_tunggu_kartu: checked.masaTunggu?.tanggal || null,
+              value_check: checked.value,
+              date_check: new Date(),
+              status: checked.masaTunggu?.status || null,
+              status_paket: checked.statusPaket,
+              kuota: checked.kuota,
+              date: today,
+            };
+
+            const result =
+              await CheckRepository.updateLogByCheckQuotaId(payload);
+
+            if (result?.success) {
+              console.log(
+                `[Console ${consoleId}] ✅ Log ID=${id} berhasil diperbarui`,
+              );
+            } else {
+              console.warn(
+                `[Console ${consoleId}] ⚠️ Log ID=${id} tidak ditemukan di gst_log_check_quota`,
+              );
+            }
+
+            if (!payload.status && !payload.masa_tunggu_kartu) {
+              await db.query(
+                `UPDATE gst_log_check_quota 
+               SET status_paket = 'Error' 
+               WHERE check_quota_id = ?`,
+                [check_quota_id],
+              );
+              console.warn(
+                `[Console ${consoleId}] 🚫 Tandai ID=${id} sebagai Error (data kosong)`,
+              );
+            }
+          } catch (err) {
+            console.error(
+              `[Console ${consoleId}] ❌ Gagal update log ID=${check_quota_id}:`,
+              err.message,
+            );
+            await db.query(
+              `UPDATE gst_log_check_quota 
+             SET status_paket = 'Error' 
+             WHERE check_quota_id = ?`,
+              [check_quota_id],
+            );
+          }
+        }),
+      );
+
+      await Promise.all(tasks);
+
+      if (i + BATCH_SIZE < incompleteLogs.length) {
+        console.log(`[Console ${consoleId}] ⏳ Delay antar batch...`);
+        await delay(2000);
       }
     }
 
-    console.log("🔁 Update incomplete logs selesai ✅");
+    console.log(`[Console ${consoleId}] 🔁 Update incomplete logs selesai ✅`);
   }
 }
