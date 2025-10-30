@@ -14,7 +14,7 @@ export default class CheckRepository {
        WHERE status = 0
        AND console=?
        ORDER BY id ASC
-       LIMIT 10
+       LIMIT 5
        FOR UPDATE`,
         [consoleId],
       );
@@ -144,25 +144,8 @@ export default class CheckRepository {
       date,
     } = data;
 
-    const connection = await db.getConnection();
     try {
-      await connection.beginTransaction();
-
-      // Kunci 1 baris spesifik berdasarkan check_quota_id
-      const [rows] = await connection.query(
-        `SELECT check_quota_id 
-       FROM gst_log_check_quota 
-       WHERE check_quota_id = ? 
-       FOR UPDATE`,
-        [check_quota_id],
-      );
-
-      if (rows.length === 0) {
-        await connection.rollback();
-        return null; // tidak ditemukan
-      }
-
-      await connection.query(
+      const [result] = await db.query(
         `UPDATE gst_log_check_quota
        SET sn = ?, 
            msisdn = ?, 
@@ -188,13 +171,10 @@ export default class CheckRepository {
         ],
       );
 
-      await connection.commit();
-      return { success: true };
+      return { success: result.affectedRows > 0 };
     } catch (err) {
-      await connection.rollback();
+      console.error("updateLogByCheckQuotaId gagal:", err.message);
       throw err;
-    } finally {
-      connection.release();
     }
   }
 }

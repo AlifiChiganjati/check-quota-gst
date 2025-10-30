@@ -134,7 +134,7 @@ export default class CheckService {
                 kuota_lainnya: lainnya,
                 masa_tunggu_paket: masaTungguPaket,
               },
-              kuota: `${sisa_kuota} GB`,
+              kuota: `${sisa_kuota}`,
             };
           } else {
             return {
@@ -173,7 +173,7 @@ export default class CheckService {
               message: err.message || "Gagal ambil data",
               statusCode: err.response?.status || null,
             },
-            kuota: "0 GB",
+            kuota: "0",
           };
         }
       }),
