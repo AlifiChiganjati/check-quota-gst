@@ -108,11 +108,15 @@ export default class CheckService {
             const match = kuotaPending.match(/\d+\s*GB/);
             kuotaValue = match ? match[0] : 0;
           }
-
+          // Check if both are empty, and set statusPaket to 'Error'
+          if (!kuotaPending && !redeemPending) {
+            statusPaket = "Error";
+          }
           const sisa_kuota =
             parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
 
           const statusPaket = masaWaktu ? "Value" : "Pending Paket";
+          // setelah semua data diambil
 
           if (masaWaktu) {
             return {
@@ -184,6 +188,7 @@ export default class CheckService {
 
     return results;
   }
+
   static async insertDB(results) {
     console.log("start insert log");
 
@@ -191,16 +196,24 @@ export default class CheckService {
     const BATCH_SIZE = 10;
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-    // Helper: aman untuk value undefined/null
     const safe = (val, fallback = null) => (val === undefined ? fallback : val);
+
+    // helper status update
+    const handleStatusUpdate = async (isSuccess, id, sn) => {
+      const newStatus = isSuccess ? 4 : 2;
+      await CheckRepository.updateStatus(id, newStatus);
+      if (isSuccess) {
+        console.log(`✅ SN=${sn}, ID=${id} berhasil disimpan`);
+      } else {
+        console.warn(`❌ SN=${sn}, ID=${id} gagal disimpan`);
+      }
+    };
 
     for (let i = 0; i < results.length; i += BATCH_SIZE) {
       const batch = results.slice(i, i + BATCH_SIZE);
 
       await Promise.all(
         batch.map(async (data) => {
-          // normalize semua field
           const sn = safe(normalize(data.serialNumber, data.sn), null);
           const msisdn = safe(normalize(data.phoneNumber, data.msisdn), null);
           const masaTungguTanggal = safe(
@@ -212,15 +225,10 @@ export default class CheckService {
           const kuota = safe(normalize(data.kuota, "0 GB"), "0 GB");
           const check_quota_id = safe(data.id, null);
 
-          // pastikan JSON tidak undefined
           const value_check =
             data.value && Object.keys(data.value).length > 0
               ? data.value
-              : {
-                  message: "coba periksa url",
-                  sn,
-                  msisdn,
-                };
+              : { message: "coba periksa url", sn, msisdn };
 
           const payload = {
             sn,
@@ -242,50 +250,35 @@ export default class CheckService {
             );
 
             if (!alreadyInserted) {
+              // insert baru
               await CheckRepository.insert(payload);
-
-              // 🔹 Cek apakah hasil scraping error
-              if (data.statusPaket === "Error") {
-                await db.query(
-                  `UPDATE gst_check_quota SET status = 2 WHERE id = ?`,
-                  [data.id],
-                );
-                console.warn(
-                  `❌ Gagal scraping untuk SN=${payload.sn}, ID=${data.id}`,
-                );
-              } else {
-                await db.query(
-                  `UPDATE gst_check_quota SET status = 4 WHERE id = ?`,
-                  [data.id],
-                );
-                console.log(
-                  `✅ Berhasil insert SN=${payload.sn}, ID=${data.id}`,
-                );
-              }
+              await handleStatusUpdate(true, data.id, payload.sn);
             } else {
+              // insert ulang (ref++)
+              const lastRef = await CheckRepository.getLastRef(
+                payload.check_quota_id,
+                payload.date,
+              );
+              payload.ref = lastRef + 1;
+
+              await CheckRepository.insert(payload);
               console.log(
-                `⚠️ Data id=${payload.check_quota_id} untuk tanggal ${payload.date} sudah ada, skip insert`,
+                `🔁 Insert ulang ref=${payload.ref} untuk ID=${data.id}`,
               );
-              await db.query(
-                `UPDATE gst_check_quota SET status = 3 WHERE id = ?`,
-                [data.id],
-              );
+              await handleStatusUpdate(true, data.id, payload.sn);
             }
           } catch (err) {
-            console.error(`Gagal insert ${payload.sn}:`, err.message);
-            await db.query(
-              `UPDATE gst_check_quota SET status = 2 WHERE id = ?`,
-              [data.id],
-            );
+            console.error(`Gagal insert SN=${payload.sn}:`, err.message);
+            await handleStatusUpdate(false, data.id, payload.sn);
           }
         }),
       );
 
-      // delay antar batch
       if (i + BATCH_SIZE < results.length) {
         await delay(1000);
       }
     }
+
     console.log("Insert batch selesai ✅");
   }
 
@@ -302,168 +295,21 @@ export default class CheckService {
     }
   }
 
-  // Tambahan di CheckService
-  static async updateIncompleteLogs(consoleId) {
-    const d = new Date();
-    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    console.log(
-      `🔍 [Console ${consoleId}] Cari log tidak lengkap (${today})...`,
-    );
-
-    const connection = await db.getConnection();
+  static async resetStatusGst(consoleId) {
     try {
-      // Ambil semua log yang belum lengkap — hindari join langsung
-      const [incompleteLogs] = await connection.query(
-        `SELECT check_quota_id 
-         FROM gst_log_check_quota 
-         WHERE (status IS NULL OR status = '')
-           AND (masa_tunggu_kartu IS NULL OR masa_tunggu_kartu = '')
-           AND status_paket != 'Error'
-           AND date = ?
-           AND check_quota_id IN (
-             SELECT id FROM gst_check_quota WHERE console = ?
-           )`,
-        [today, consoleId],
-      );
-
-      if (!incompleteLogs.length) {
-        console.log(
-          `[Console ${consoleId}] ✅ Tidak ada log yang perlu diperbarui`,
-        );
-        return;
-      }
-
+      const result = await CheckRepository.resetStatusGst(consoleId);
       console.log(
-        `[Console ${consoleId}] Ditemukan ${incompleteLogs.length} log belum lengkap`,
+        `Update status berhasil, baris terpengaruh: ${result.affectedRows}`,
       );
-
-      const BATCH_SIZE = 10;
-      const CONCURRENCY = 3; // dikurangi agar koneksi stabil dan bebas deadlock
-      const limit = pLimit(CONCURRENCY);
-      const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-
-      // Helper query dengan retry anti-deadlock
-      const safeQuery = async (query, params, retries = 3) => {
-        for (let i = 0; i < retries; i++) {
-          try {
-            return await connection.query(query, params);
-          } catch (err) {
-            if (err.code === "ER_LOCK_DEADLOCK" && i < retries - 1) {
-              console.warn(
-                `[Console ${consoleId}] 🔁 Deadlock detected, retry ${i + 1}`,
-              );
-              await delay(500 * (i + 1));
-            } else {
-              throw err;
-            }
-          }
-        }
-      };
-
-      // Proses per batch
-      for (let i = 0; i < incompleteLogs.length; i += BATCH_SIZE) {
-        const batch = incompleteLogs.slice(i, i + BATCH_SIZE);
-        console.log(
-          `[Console ${consoleId}] 🔁 Jalankan batch ${i / BATCH_SIZE + 1} (${batch.length} item)...`,
-        );
-
-        const tasks = batch.map(({ check_quota_id }) =>
-          limit(async () => {
-            try {
-              const [rows] = await safeQuery(
-                `SELECT id, url_check, sn, msisdn 
-                 FROM gst_check_quota 
-                 WHERE id = ? AND console = ?`,
-                [check_quota_id, consoleId],
-              );
-
-              if (!rows.length) {
-                console.warn(
-                  `[Console ${consoleId}] ⚠️ ID=${check_quota_id} tidak ditemukan`,
-                );
-                return;
-              }
-
-              const { id, url_check, sn, msisdn } = rows[0];
-              console.log(
-                `[Console ${consoleId}] 🔁 Recheck ID=${id} URL=${url_check}`,
-              );
-
-              // Jalankan pengecekan ulang (asumsi CheckService aman dipanggil paralel)
-              const [checked] = await CheckService.checkAllUrls([
-                { id, url_check, sn, msisdn },
-              ]);
-
-              const payload = {
-                check_quota_id: id,
-                sn: checked.sn,
-                msisdn: checked.msisdn,
-                masa_tunggu_kartu: checked.masaTunggu?.tanggal || null,
-                value_check: checked.value,
-                date_check: new Date(),
-                status: checked.masaTunggu?.status || null,
-                status_paket: checked.statusPaket,
-                kuota: checked.kuota,
-                date: today,
-              };
-
-              const result =
-                await CheckRepository.updateLogByCheckQuotaId(payload);
-
-              if (result?.success) {
-                console.log(
-                  `[Console ${consoleId}] ✅ Log ID=${id} berhasil diperbarui`,
-                );
-              } else {
-                console.warn(
-                  `[Console ${consoleId}] ⚠️ Log ID=${id} tidak ditemukan di gst_log_check_quota`,
-                );
-              }
-
-              if (!payload.status && !payload.masa_tunggu_kartu) {
-                await safeQuery(
-                  `UPDATE gst_log_check_quota 
-                   SET status_paket = 'Error' 
-                   WHERE check_quota_id = ?`,
-                  [check_quota_id],
-                );
-                console.warn(
-                  `[Console ${consoleId}] 🚫 Tandai ID=${id} sebagai Error (data kosong)`,
-                );
-              }
-            } catch (err) {
-              console.error(
-                `[Console ${consoleId}] ❌ Gagal update log ID=${check_quota_id}:`,
-                err.message,
-              );
-              await safeQuery(
-                `UPDATE gst_log_check_quota 
-                 SET status_paket = 'Error' 
-                 WHERE check_quota_id = ?`,
-                [check_quota_id],
-              );
-            }
-          }),
-        );
-
-        await Promise.all(tasks);
-
-        if (i + BATCH_SIZE < incompleteLogs.length) {
-          console.log(`[Console ${consoleId}] ⏳ Delay antar batch...`);
-          await delay(2000);
-        }
-      }
-
-      console.log(
-        `[Console ${consoleId}] 🔁 Update incomplete logs selesai ✅`,
-      );
+      return result;
     } catch (err) {
-      console.error(
-        `[Console ${consoleId}] 💥 Terjadi kesalahan fatal:`,
-        err.message,
-      );
-    } finally {
-      connection.release();
+      console.error("Error saat update status:", err);
+      throw err;
     }
+  }
+
+  static async listResetGst(consoleId) {
+    const result = await CheckRepository.getAllResetGst(consoleId);
+    return result;
   }
 }

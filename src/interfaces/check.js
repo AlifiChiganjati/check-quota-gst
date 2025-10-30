@@ -50,16 +50,23 @@ const check = async (consoleId) => {
     }
   }
 
-  console.log("Proses check semua data selesai:", new Date().toLocaleString());
-
   try {
-    await CheckService.updateIncompleteLogs(consoleId);
+    console.log("Ambil SN dari DB...");
+    const allResetGst = await CheckRepository.getAllResetGst(consoleId);
+
+    console.log("Jumlah SN Direset: ", allResetGst.length);
+
+    if (allResetGst.length > 0) {
+      console.log(`Ada data yg di reset ${allResetGst.length}`);
+      await CheckRepository.resetStatusGst(consoleId);
+    }
   } catch (err) {
-    console.error(
-      `[Console ${consoleId}] ❌ Gagal update incomplete logs:`,
-      err,
-    );
+    console.error("❌ Error Reset Gst SN:", err);
+    console.error("Stack trace:", err?.stack);
+    await new Promise((r) => setTimeout(r, 10000));
   }
+
+  console.log("Proses check semua data selesai:", new Date().toLocaleString());
 };
 
 const runCheck = async (consoleId) => {
@@ -72,8 +79,8 @@ const runCheck = async (consoleId) => {
 
   await check(consoleId);
 
-  console.log("Tunggu 5 menit untuk run berikutnya...");
-  setTimeout(() => runCheck(consoleId), 5 * 60 * 1000);
+  console.log("Tunggu 3 menit untuk run berikutnya...");
+  setTimeout(() => runCheck(consoleId), 3 * 60 * 1000);
 };
 
 export default runCheck;
