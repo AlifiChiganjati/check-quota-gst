@@ -2,7 +2,6 @@
 import CheckRepository from "../repository/check.repository.js";
 import * as cheerio from "cheerio";
 import axios from "axios";
-import db from "../config/db.js";
 import { normalize } from "../utils/normalize.js";
 import pLimit from "p-limit";
 
@@ -109,7 +108,6 @@ export default class CheckService {
           const redeemPending = getPendingRow("Dapat di redeem hingga");
 
           let kuotaValue = 0;
-          let statusPaket = "";
           if (kuotaPending && !kuotaPending.includes("InternetMAX")) {
             const match = kuotaPending.match(/\d+\s*GB/);
             kuotaValue = match ? match[0] : 0;
@@ -118,11 +116,33 @@ export default class CheckService {
           const sisa_kuota =
             parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
 
-          statusPaket = masaWaktu ? "Value" : "Pending Paket";
-          // Check if both are empty, and set statusPaket to 'Error'
-          if (!kuotaPending && !redeemPending) {
-            statusPaket = "Error";
+          const hasInfoItem = $(".info-item").length > 0;
+
+          let statusPaket = "";
+          let errorMessage = null;
+
+          if (hasInfoItem) {
+            // parsing normal seperti sebelumnya
+            statusPaket = masaWaktu ? "Value" : "Pending Paket";
+
+            const tanggalMasaTungguTrim = tanggalMasaTunggu?.trim() || null;
+            const statusMasaTungguTrim = statusMasaTunggu?.trim() || null;
+
+            if (!tanggalMasaTungguTrim && !statusMasaTungguTrim) {
+              // ambil pesan <p> yang relevan
+              errorMessage = $("p").first().text().trim() || null;
+              statusPaket = errorMessage
+                ? `Error: ${errorMessage}`
+                : "Error: Data tidak ditemukan";
+            }
+          } else {
+            // halaman HTML penuh, info-item tidak ada
+            errorMessage = $("p").first().text().trim() || null;
+            statusPaket = errorMessage
+              ? `Error: ${errorMessage}`
+              : "Error: Data tidak ditemukan";
           }
+
           if (masaWaktu) {
             return {
               id,
