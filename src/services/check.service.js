@@ -40,6 +40,12 @@ export default class CheckService {
             const match = str.match(/(\d+)/);
             return match ? parseInt(match[1], 10) : 0;
           };
+          const cleanDate = (str) => {
+            if (!str) return null;
+            // validasi format tanggal (ex: "25 Nov 2025 23:59:59")
+            const pattern = /^\d{1,2}\s\w{3}\s\d{4}\s\d{2}:\d{2}:\d{2}$/;
+            return pattern.test(str.trim()) ? str.trim() : null;
+          };
 
           const getExactValueByTitle = (title) => {
             const item = $(".info-item").filter(
@@ -86,7 +92,7 @@ export default class CheckService {
           const kuotaNasional = getValueRow("Kuota Nasional");
           const kuotaLokal = getValueRow("Kuota Lokal");
           const lainnya = getValueRow("Lainnya");
-          const masaTungguPaket = getValueRow("Masa Tunggu Paket");
+          const masaTungguPaket = cleanDate(getValueRow("Masa Tunggu Paket"));
 
           const getPendingRow = (rowTitle) =>
             pendingItem
@@ -103,21 +109,20 @@ export default class CheckService {
           const redeemPending = getPendingRow("Dapat di redeem hingga");
 
           let kuotaValue = 0;
-
+          let statusPaket = "";
           if (kuotaPending && !kuotaPending.includes("InternetMAX")) {
             const match = kuotaPending.match(/\d+\s*GB/);
             kuotaValue = match ? match[0] : 0;
           }
+
+          const sisa_kuota =
+            parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
+
+          statusPaket = masaWaktu ? "Value" : "Pending Paket";
           // Check if both are empty, and set statusPaket to 'Error'
           if (!kuotaPending && !redeemPending) {
             statusPaket = "Error";
           }
-          const sisa_kuota =
-            parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
-
-          const statusPaket = masaWaktu ? "Value" : "Pending Paket";
-          // setelah semua data diambil
-
           if (masaWaktu) {
             return {
               id,
