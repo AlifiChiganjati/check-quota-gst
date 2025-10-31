@@ -247,7 +247,7 @@ export default class CheckService {
           );
           const status = safe(normalize(data.masaTunggu?.status, null), null);
           const statusPaket = safe(normalize(data.statusPaket, null), null);
-          const kuota = safe(normalize(data.kuota, "0 GB"), "0 GB");
+          const kuota = safe(normalize(data.kuota, "0 GB"), "0");
           const check_quota_id = safe(data.id, null);
 
           const value_check =
@@ -320,12 +320,48 @@ export default class CheckService {
     }
   }
 
+  static async resetStatusFailedInsert(consoleId) {
+    try {
+      console.log("Try get All failed Insert...");
+      const failedInsert =
+        await CheckRepository.getAllStatusFailedInsert(consoleId);
+      console.log(`Jumlah gagal insert ditemukan: ${failedInsert.length}`);
+
+      let result = { affectedRows: 0 }; // <-- inisialisasi aman
+
+      if (failedInsert.length > 0) {
+        result = await CheckRepository.updateStatusFailedInsert(consoleId);
+        console.log(
+          `Berhasil reset gagal insert, baris terpengaruh: ${result.affectedRows}`,
+        );
+      }
+
+      return result;
+    } catch (err) {
+      console.error("Error saat reset status gagal insert:", err);
+      throw err;
+    }
+  }
+
   static async resetStatusGst(consoleId) {
     try {
-      const result = await CheckRepository.resetStatusGst(consoleId);
-      console.log(
-        `Update status berhasil, baris terpengaruh: ${result.affectedRows}`,
-      );
+      console.log("Ambil SN dari DB...");
+      const allResetGst = await CheckRepository.getAllResetGst(consoleId);
+
+      console.log("Jumlah SN Direset:", allResetGst.length);
+
+      let result = null; // <-- inisialisasi di awal
+
+      if (allResetGst.length > 0) {
+        console.log(`Ada data yg di reset ${allResetGst.length}`);
+        [result] = await db.query(
+          `UPDATE gst_check_quota 
+         SET status = 0 
+         WHERE status = 3 AND console = ?`,
+          [consoleId],
+        );
+      }
+
       return result;
     } catch (err) {
       console.error("Error saat update status:", err);

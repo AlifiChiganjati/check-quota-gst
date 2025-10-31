@@ -14,8 +14,8 @@ const isInternetAvailable = async () => {
 
 const check = async (consoleId) => {
   console.log("Mulai proses check:", new Date().toLocaleString());
-
-  while (true) {
+  let maxCycle = 300; // maksimal iterasi, misalnya 300 batch
+  while (maxCycle-- > 0) {
     let internet = await isInternetAvailable();
     while (!internet) {
       console.log("Internet mati, menunggu 10 detik...");
@@ -48,18 +48,15 @@ const check = async (consoleId) => {
       console.error("Stack trace:", err?.stack);
       await new Promise((r) => setTimeout(r, 10000));
     }
+    if (maxCycle <= 0) {
+      console.log("❌ Maksimal loop tercapai, hentikan proses untuk keamanan");
+      break;
+    }
   }
 
   try {
-    console.log("Ambil SN dari DB...");
-    const allResetGst = await CheckRepository.getAllResetGst(consoleId);
-
-    console.log("Jumlah SN Direset: ", allResetGst.length);
-
-    if (allResetGst.length > 0) {
-      console.log(`Ada data yg di reset ${allResetGst.length}`);
-      await CheckRepository.resetStatusGst(consoleId);
-    }
+    await CheckService.resetStatusFailedInsert(consoleId);
+    await CheckService.resetStatusGst(consoleId);
   } catch (err) {
     console.error("❌ Error Reset Gst SN:", err);
     console.error("Stack trace:", err?.stack);
