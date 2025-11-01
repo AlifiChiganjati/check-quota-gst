@@ -373,4 +373,13 @@ export default class CheckService {
     const result = await CheckRepository.getAllResetGst(consoleId);
     return result;
   }
+  static async resetStatusGstStuck(consoleId) {
+    try {
+      const result = await CheckRepository.resetStuck(consoleId);
+      console.log("Semua data hari ini sudah di-log, proses selesai");
+      return result;
+    } catch (error) {
+      console.log("Error: ", error);
+    }
+  }
 }

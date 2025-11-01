@@ -103,12 +103,14 @@ export default class CheckRepository {
   }
 
   // repository/check.repository.js
-  static async resetStuck() {
+  static async resetStuck(consoleId) {
     try {
       const [result] = await db.query(
         `UPDATE gst_check_quota 
        SET status = 0 
-       WHERE status = 1`,
+       WHERE status = 1
+       AND console = ?`,
+        [consoleId],
       );
       console.log(`Reset status=1 -> 0: ${result.affectedRows} row`);
       return result;

@@ -1,6 +1,6 @@
 // interfaces/check.js
 import CheckService from "../services/check.service.js";
-import CheckRepository from "../repository/check.repository.js";
+import BackupService from "../services/backup.service.js";
 import dns from "dns/promises";
 
 const isInternetAvailable = async () => {
@@ -25,14 +25,14 @@ const check = async (consoleId) => {
 
     try {
       console.log("Ambil URL dari DB...");
-      const urls = await CheckRepository.getAllUrl(consoleId);
+      const urls = await CheckService.listUrls(consoleId);
 
       console.log("Jumlah URL:", urls.length);
       if (!urls.length) {
         console.log("Semua data hari ini sudah di-log, proses selesai");
 
         // 🔹 Reset status 1 yang nyangkut sebelum break
-        await CheckRepository.resetStuck();
+        await CheckService.resetStatusGstStuck(consoleId);
         break;
       }
 
@@ -57,6 +57,7 @@ const check = async (consoleId) => {
   try {
     await CheckService.resetStatusFailedInsert(consoleId);
     await CheckService.resetStatusGst(consoleId);
+    await BackupService.listAllLogs(consoleId);
   } catch (err) {
     console.error("❌ Error Reset Gst SN:", err);
     console.error("Stack trace:", err?.stack);
