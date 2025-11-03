@@ -17,4 +17,17 @@ ORDER BY l.id ASC;`,
     );
     return rows;
   }
+
+  static async alreadyInsertLogsBackup(check_quota_id, date, ref) {
+    const [rows] = await db.query(
+      `
+SELECT id 
+FROM gst_log_check_quota_backup 
+WHERE check_quota_id = ? 
+AND date = ?
+AND ref = ?`,
+      [check_quota_id, date, ref],
+    );
+    return rows;
+  }
 }

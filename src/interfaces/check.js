@@ -57,7 +57,7 @@ const check = async (consoleId) => {
   try {
     await CheckService.resetStatusFailedInsert(consoleId);
     await CheckService.resetStatusGst(consoleId);
-    await BackupService.listAllLogs(consoleId);
+    await BackupService.moveOldLogsToBackup(consoleId);
   } catch (err) {
     console.error("❌ Error Reset Gst SN:", err);
     console.error("Stack trace:", err?.stack);

@@ -11,4 +11,23 @@ export default class BackupService {
       console.log("Error: ", err);
     }
   }
+
+  static async moveOldLogsToBackup(consoleId) {
+    const allLogs = await BackupService.listAllLogs(consoleId);
+    if (allLogs.length > 0) {
+      for (const allLog of allLogs) {
+        const alreadylogBackup = await BackupRepository.alreadyInsertLogsBackup(
+          allLog.check_quota_id,
+          allLog.date,
+          allLog.ref,
+        );
+        if (alreadylogBackup.length === 0) {
+          console.log("belum ada backup", allLog.id);
+        }
+      }
+    }
+  }
+  static async insertOldLogsToBackup(payload) {
+    const [] = payload;
+  }
 }
