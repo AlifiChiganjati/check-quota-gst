@@ -22,7 +22,8 @@ export default class BackupService {
           allLog.ref,
         );
         if (alreadylogBackup.length === 0) {
-          console.log("belum ada backup", allLog.id);
+          // console.log("belum ada backup", allLog.id);
+          return;
         }
       }
     }

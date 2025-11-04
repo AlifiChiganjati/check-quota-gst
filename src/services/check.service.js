@@ -39,12 +39,15 @@ export default class CheckService {
             const match = str.match(/(\d+)/);
             return match ? parseInt(match[1], 10) : 0;
           };
-          const cleanDate = (str) => {
-            if (!str) return null;
-            // validasi format tanggal (ex: "25 Nov 2025 23:59:59")
-            const pattern = /^\d{1,2}\s\w{3}\s\d{4}\s\d{2}:\d{2}:\d{2}$/;
-            return pattern.test(str.trim()) ? str.trim() : null;
-          };
+          const normalizeText = (txt) =>
+            (txt || "")
+              .replace(/\u00A0/g, " ") // non-breaking space
+              .replace(/\s+/g, " ") // collapse whitespace/newlines
+              .trim();
+
+          // regex fleksibel untuk cari tanggal "08 Nov 2025 16:18:59" atau "08 Nov 2025"
+          const dateRegex =
+            /(\b\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{2,4}(?:\s\d{2}:\d{2}:\d{2})?\b)/i;
 
           const getExactValueByTitle = (title) => {
             const item = $(".info-item").filter(
@@ -75,42 +78,63 @@ export default class CheckService {
           const valueItem = $(".info-item").filter(
             (_, el) => $(el).find(".title").text().trim() === "Value",
           );
+          // fallback: kalau tidak ketemu, cari tbody langsung
+          if (valueItem.length === 0) {
+            valueItem = $("tbody");
+          }
+          const getValueRow = (rowTitle) => {
+            // ambil semua tr di dalam valueItem
+            const rows = valueItem.find("tr");
+            let foundText = "";
 
-          const getValueRow = (rowTitle) =>
-            valueItem
-              .find("tr")
-              .filter(
-                (_, el) =>
-                  $(el).find("td.other-title").text().trim() === rowTitle,
-              )
-              .find("td.other-value")
-              .text()
-              .trim();
+            rows.each((_, el) => {
+              const titleTd = $(el).find("td.other-title").text();
+              const title = normalizeText(titleTd).toLowerCase();
+              if (title.includes(rowTitle.toLowerCase())) {
+                // ambil ONLY the first matching row's other-value, normalized
+                foundText = normalizeText($(el).find("td.other-value").text());
+                return false; // break out of .each
+              }
+            });
 
-          const masaWaktu = getValueRow("Masa Waktu");
+            return foundText || "";
+          };
+
+          const getPendingRow = (rowTitle) => {
+            const rows = pendingItem.find("tr");
+            let foundText = "";
+
+            rows.each((_, el) => {
+              const titleTd = $(el).find("td.other-title").text();
+              const title = normalizeText(titleTd).toLowerCase();
+              if (title.includes(rowTitle.toLowerCase())) {
+                foundText = normalizeText($(el).find("td.other-value").text());
+                return false;
+              }
+            });
+
+            return foundText || "";
+          };
+          const masaWaktu = getValueRow("Masa Waktu"); // "60 hari" atau ""
           const kuotaNasional = getValueRow("Kuota Nasional");
           const kuotaLokal = getValueRow("Kuota Lokal");
           const lainnya = getValueRow("Lainnya");
-          const masaTungguPaket = cleanDate(getValueRow("Masa Tunggu Paket"));
 
-          const getPendingRow = (rowTitle) =>
-            pendingItem
-              .find("tr")
-              .filter(
-                (_, el) =>
-                  $(el).find("td.other-title").text().trim() === rowTitle,
-              )
-              .find("td.other-value")
-              .text()
-              .trim();
+          const rawMasaTungguPaketText = getValueRow("Masa Tunggu Paket");
+          let masaTungguPaket = null;
+          if (rawMasaTungguPaketText) {
+            const m = rawMasaTungguPaketText.match(dateRegex);
+            masaTungguPaket = m ? m[1] : null;
+          }
 
           const kuotaPending = getPendingRow("Kuota");
           const redeemPending = getPendingRow("Dapat di redeem hingga");
 
+          // kuotaValue from pending: ambil first "XX GB" occurrence (jika ada)
           let kuotaValue = 0;
           if (kuotaPending && !kuotaPending.includes("InternetMAX")) {
-            const match = kuotaPending.match(/\d+\s*GB/);
-            kuotaValue = match ? match[0] : 0;
+            const match = kuotaPending.match(/(\d+)\s*GB/i);
+            kuotaValue = match ? `${match[1]} GB` : "0";
           }
 
           const sisa_kuota =
@@ -122,27 +146,49 @@ export default class CheckService {
           let errorMessage = null;
 
           if (hasInfoItem) {
-            // parsing normal seperti sebelumnya
-            statusPaket = masaWaktu ? "Value" : "Pending Paket";
+            // Pertimbangkan 'Value' valid bila ada salah satu field yang meaningful:
+            const hasMeaningfulValue =
+              (masaWaktu && masaWaktu.length > 0) ||
+              parseGB(kuotaNasional) > 0 ||
+              parseGB(kuotaLokal) > 0 ||
+              parseGB(lainnya) > 0 ||
+              (rawMasaTungguPaketText &&
+                dateRegex.test(rawMasaTungguPaketText));
 
+            if (hasMeaningfulValue) {
+              statusPaket = "Value";
+            } else if (
+              (kuotaPending && kuotaPending.length > 0) ||
+              (redeemPending && redeemPending.length > 0)
+            ) {
+              statusPaket = "Pending Paket";
+            } else {
+              // fallback: coba ambil pesan <p> jika ada (halaman error)
+              errorMessage = $("p").first().text().trim() || null;
+              statusPaket = errorMessage
+                ? `Error: ${errorMessage}`
+                : "Error: Data tidak ditemukan";
+            }
+
+            // cek masa tunggu kartu: kalau tanggal dan status hilang -> error
             const tanggalMasaTungguTrim = tanggalMasaTunggu?.trim() || null;
             const statusMasaTungguTrim = statusMasaTunggu?.trim() || null;
-
-            if (!tanggalMasaTungguTrim && !statusMasaTungguTrim) {
-              // ambil pesan <p> yang relevan
+            if (
+              !tanggalMasaTungguTrim &&
+              !statusMasaTungguTrim &&
+              !hasMeaningfulValue
+            ) {
               errorMessage = $("p").first().text().trim() || null;
               statusPaket = errorMessage
                 ? `Error: ${errorMessage}`
                 : "Error: Data tidak ditemukan";
             }
           } else {
-            // halaman HTML penuh, info-item tidak ada
             errorMessage = $("p").first().text().trim() || null;
             statusPaket = errorMessage
               ? `Error: ${errorMessage}`
               : "Error: Data tidak ditemukan";
           }
-
           if (masaWaktu) {
             return {
               id,
