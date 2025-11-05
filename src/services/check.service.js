@@ -4,6 +4,7 @@ import * as cheerio from "cheerio";
 import axios from "axios";
 import { normalize } from "../utils/normalize.js";
 import pLimit from "p-limit";
+import db from "../config/db.js";
 
 export default class CheckService {
   static async listUrls(consoleId) {
@@ -75,9 +76,10 @@ export default class CheckService {
             (_, el) => $(el).find(".title").text().trim() === "Pending Paket",
           );
 
-          const valueItem = $(".info-item").filter(
+          let valueItem = $(".info-item").filter(
             (_, el) => $(el).find(".title").text().trim() === "Value",
           );
+
           // fallback: kalau tidak ketemu, cari tbody langsung
           if (valueItem.length === 0) {
             valueItem = $("tbody");
@@ -400,12 +402,7 @@ export default class CheckService {
 
       if (allResetGst.length > 0) {
         console.log(`Ada data yg di reset ${allResetGst.length}`);
-        [result] = await db.query(
-          `UPDATE gst_check_quota 
-         SET status = 0 
-         WHERE status = 3 AND console = ?`,
-          [consoleId],
-        );
+        result = CheckRepository.updateAllResetGst(consoleId);
       }
 
       return result;

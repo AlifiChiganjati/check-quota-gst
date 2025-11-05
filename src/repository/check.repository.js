@@ -129,6 +129,16 @@ export default class CheckRepository {
     return rows;
   }
 
+  static async updateAllResetGst(consoleId) {
+    [result] = await db.query(
+      `UPDATE gst_check_quota 
+         SET status = 0 
+         WHERE status = 3 AND console = ?`,
+      [consoleId],
+    );
+    return result;
+  }
+
   static async updateStatus(id, status) {
     return await db.query(
       `UPDATE gst_check_quota SET status = ? WHERE id = ?`,
