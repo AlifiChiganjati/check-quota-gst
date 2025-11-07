@@ -14,7 +14,7 @@ export default class CheckRepository {
        WHERE status = 0
        AND console=?
        ORDER BY id ASC
-       LIMIT 8
+       LIMIT 5
        FOR UPDATE`,
         [consoleId],
       );

@@ -4,7 +4,6 @@ import * as cheerio from "cheerio";
 import axios from "axios";
 import { normalize } from "../utils/normalize.js";
 import pLimit from "p-limit";
-import db from "../config/db.js";
 
 export default class CheckService {
   static async listUrls(consoleId) {
@@ -14,13 +13,13 @@ export default class CheckService {
 
   static async checkAllUrls(urls) {
     const results = [];
-    const limit = pLimit(5);
+    const limit = pLimit(3);
     const fetchWithRetry = async (url, retries = 3) => {
       for (let i = 0; i < retries; i++) {
         try {
           return await axios.get(url, {
             headers: { "User-Agent": "Mozilla/5.0 (Node.js Scraper)" },
-            timeout: 10000,
+            timeout: 15000,
           });
         } catch (err) {
           if (i === retries - 1) throw err;
@@ -48,7 +47,7 @@ export default class CheckService {
 
           // regex fleksibel untuk cari tanggal "08 Nov 2025 16:18:59" atau "08 Nov 2025"
           const dateRegex =
-            /(\b\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{2,4}(?:\s\d{2}:\d{2}:\d{2})?\b)/i;
+            /(\d{1,2}\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\d{4}(?:\s*\d{2}:\d{2}:\d{2})?)/i;
 
           const getExactValueByTitle = (title) => {
             const item = $(".info-item").filter(
@@ -125,8 +124,9 @@ export default class CheckService {
           const rawMasaTungguPaketText = getValueRow("Masa Tunggu Paket");
           let masaTungguPaket = null;
           if (rawMasaTungguPaketText) {
-            const m = rawMasaTungguPaketText.match(dateRegex);
-            masaTungguPaket = m ? m[1] : null;
+            const cleaned = normalizeText(rawMasaTungguPaketText);
+            const m = cleaned.match(dateRegex);
+            masaTungguPaket = m ? m[1] : cleaned; // fallback pakai cleaned aja kalau regex gagal
           }
 
           const kuotaPending = getPendingRow("Kuota");
@@ -266,7 +266,7 @@ export default class CheckService {
     console.log("start insert log");
 
     const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 5;
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const safe = (val, fallback = null) => (val === undefined ? fallback : val);
