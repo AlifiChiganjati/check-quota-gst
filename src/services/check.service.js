@@ -46,9 +46,56 @@ export default class CheckService {
               .trim();
 
           // regex fleksibel untuk cari tanggal "08 Nov 2025 16:18:59" atau "08 Nov 2025"
+          const monthMap = {
+            Jan: 0,
+            Feb: 1,
+            Mar: 2,
+            Apr: 3,
+            May: 4,
+            Jun: 5,
+            Jul: 6,
+            Aug: 7,
+            Sep: 8,
+            Oct: 9,
+            Nov: 10,
+            Dec: 11,
+          };
           const dateRegex =
-            /(\d{1,2}\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\d{4}(?:\s*\d{2}:\d{2}:\d{2})?)/i;
+            /(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/;
+          function parseDate(text) {
+            if (!text) return null;
 
+            // regex fleksibel untuk "08 Nov 2025 16:18:59" atau "08 Nov 2025"
+            const match = text.match(dateRegex);
+
+            if (!match) return null;
+
+            const day = parseInt(match[1], 10);
+            const monthStr = match[2];
+            const year = parseInt(match[3], 10);
+            const hour = match[4] ? parseInt(match[4], 10) : 0;
+            const minute = match[5] ? parseInt(match[5], 10) : 0;
+            const second = match[6] ? parseInt(match[6], 10) : 0;
+
+            const month = monthMap[monthStr];
+            if (month === undefined) return null;
+
+            return new Date(year, month, day, hour, minute, second);
+          }
+
+          // Format kembali ke string sama seperti fetch
+          function formatDate(date) {
+            if (!date) return "";
+            const day = date.getDate().toString().padStart(2, "0");
+            const monthStr = Object.keys(monthMap).find(
+              (k) => monthMap[k] === date.getMonth(),
+            );
+            const year = date.getFullYear();
+            const hour = date.getHours().toString().padStart(2, "0");
+            const minute = date.getMinutes().toString().padStart(2, "0");
+            const second = date.getSeconds().toString().padStart(2, "0");
+            return `${day} ${monthStr} ${year} ${hour}:${minute}:${second}`;
+          }
           const getExactValueByTitle = (title) => {
             const item = $(".info-item").filter(
               (_, el) =>
@@ -121,12 +168,61 @@ export default class CheckService {
           const kuotaLokal = getValueRow("Kuota Lokal");
           const lainnya = getValueRow("Lainnya");
 
+          // --- parsing tanggal awal
           const rawMasaTungguPaketText = getValueRow("Masa Tunggu Paket");
-          let masaTungguPaket = null;
-          if (rawMasaTungguPaketText) {
-            const cleaned = normalizeText(rawMasaTungguPaketText);
-            const m = cleaned.match(dateRegex);
-            masaTungguPaket = m ? m[1] : cleaned; // fallback pakai cleaned aja kalau regex gagal
+          let parsedDate = parseDate(rawMasaTungguPaketText);
+
+          let masaTungguPaket = "";
+          let statusPaket = "";
+
+          // cek validitas awal
+          if (
+            masaWaktu &&
+            parsedDate &&
+            parsedDate.getFullYear() >= 2000 &&
+            parsedDate.getFullYear() <= 2040
+          ) {
+            // tanggal valid, langsung pakai
+            masaTungguPaket = formatDate(parsedDate);
+            statusPaket = "Value";
+          } else {
+            console.warn(
+              `⚠️  Tanggal mencurigakan (${rawMasaTungguPaketText}) untuk msisdn=${msisdn}`,
+            );
+
+            try {
+              // 🔁 retry 1x halaman untuk memastikan
+              const retryResponse = await fetchWithRetry(url_check);
+              const $$ = cheerio.load(retryResponse.data);
+
+              const retryText = normalizeText(
+                $$(".other-title:contains('Masa Tunggu Paket')")
+                  .next(".other-value")
+                  .text(),
+              );
+
+              const retryParsed = parseDate(retryText);
+
+              if (
+                retryParsed &&
+                retryParsed.getFullYear() >= 2000 &&
+                retryParsed.getFullYear() <= 2040
+              ) {
+                // berhasil parse tanggal di retry
+                masaTungguPaket = formatDate(retryParsed);
+                statusPaket = "Value";
+                console.info(
+                  `✅ Tanggal berhasil diperbaiki untuk msisdn=${msisdn}`,
+                );
+              } else {
+                // gagal valid di retry
+                masaTungguPaket = retryText || rawMasaTungguPaketText;
+                statusPaket = `Error: tanggal tidak valid (setelah recheck)`;
+              }
+            } catch (e) {
+              masaTungguPaket = rawMasaTungguPaketText;
+              statusPaket = "Error: gagal recheck tanggal";
+            }
           }
 
           const kuotaPending = getPendingRow("Kuota");
@@ -142,11 +238,43 @@ export default class CheckService {
           const sisa_kuota =
             parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
 
+          const pageTitle = $("title").text().trim().toLowerCase();
           const hasInfoItem = $(".info-item").length > 0;
-
-          let statusPaket = "";
+          const bodyText = $("body").text().trim().toLowerCase();
           let errorMessage = null;
 
+          if (!hasInfoItem) {
+            if (bodyText === "success" || bodyText === "ok") {
+              return {
+                id,
+                sn,
+                msisdn,
+                url: url_check,
+                statusPaket: "Error: Response success dummy",
+                serialNumber: null,
+                phoneNumber: null,
+                masaTunggu: { tanggal: null, status: null },
+                value: {},
+                kuota: "0",
+              };
+            }
+
+            // Halaman lain yang tidak valid
+            if (!pageTitle.includes("sim card checking")) {
+              return {
+                id,
+                sn,
+                msisdn,
+                url: url_check,
+                statusPaket: "Error: Halaman tidak valid",
+                serialNumber: null,
+                phoneNumber: null,
+                masaTunggu: { tanggal: null, status: null },
+                value: {},
+                kuota: "0",
+              };
+            }
+          }
           if (hasInfoItem) {
             // Pertimbangkan 'Value' valid bila ada salah satu field yang meaningful:
             const hasMeaningfulValue =
@@ -155,8 +283,10 @@ export default class CheckService {
               parseGB(kuotaLokal) > 0 ||
               parseGB(lainnya) > 0 ||
               (rawMasaTungguPaketText &&
-                dateRegex.test(rawMasaTungguPaketText));
+                (dateRegex.test(rawMasaTungguPaketText) ||
+                  rawMasaTungguPaketText.trim().length > 0));
 
+            // if (!statusPaket.startsWith("Error")) {
             if (hasMeaningfulValue) {
               statusPaket = "Value";
             } else if (
@@ -171,7 +301,7 @@ export default class CheckService {
                 ? `Error: ${errorMessage}`
                 : "Error: Data tidak ditemukan";
             }
-
+            // }
             // cek masa tunggu kartu: kalau tanggal dan status hilang -> error
             const tanggalMasaTungguTrim = tanggalMasaTunggu?.trim() || null;
             const statusMasaTungguTrim = statusMasaTunggu?.trim() || null;
@@ -272,13 +402,15 @@ export default class CheckService {
     const safe = (val, fallback = null) => (val === undefined ? fallback : val);
 
     // helper status update
-    const handleStatusUpdate = async (isSuccess, id, sn) => {
+    const handleStatusUpdate = async (isSuccess, id, sn, msisdn) => {
       const newStatus = isSuccess ? 4 : 2;
       await CheckRepository.updateStatus(id, newStatus);
       if (isSuccess) {
-        console.log(`✅ SN=${sn}, ID=${id} berhasil disimpan`);
+        console.log(
+          `✅ MSISDN=${msisdn}, SN=${sn}, ID=${id} berhasil disimpan`,
+        );
       } else {
-        console.warn(`❌ SN=${sn}, ID=${id} gagal disimpan`);
+        console.warn(`❌ MSISDN=${msisdn}, SN=${sn}, ID=${id} gagal disimpan`);
       }
     };
 
@@ -295,7 +427,7 @@ export default class CheckService {
           );
           const status = safe(normalize(data.masaTunggu?.status, null), null);
           const statusPaket = safe(normalize(data.statusPaket, null), null);
-          const kuota = safe(normalize(data.kuota, "0 GB"), "0");
+          const kuota = safe(normalize(data.kuota, "0"), "0");
           const check_quota_id = safe(data.id, null);
 
           const value_check =
@@ -325,7 +457,12 @@ export default class CheckService {
             if (!alreadyInserted) {
               // insert baru
               await CheckRepository.insert(payload);
-              await handleStatusUpdate(true, data.id, payload.sn);
+              await handleStatusUpdate(
+                true,
+                data.id,
+                payload.sn,
+                payload.msisdn,
+              );
             } else {
               // insert ulang (ref++)
               const lastRef = await CheckRepository.getLastRef(
