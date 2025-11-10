@@ -459,11 +459,21 @@ export default class CheckService {
               console.log(
                 `🔁 Insert ulang ref=${payload.ref} untuk ID=${data.id}`,
               );
-              await handleStatusUpdate(true, data.id, payload.sn);
+              await handleStatusUpdate(
+                true,
+                data.id,
+                payload.sn,
+                payload.msisdn,
+              );
             }
           } catch (err) {
             console.error(`Gagal insert SN=${payload.sn}:`, err.message);
-            await handleStatusUpdate(false, data.id, payload.sn);
+            await handleStatusUpdate(
+              false,
+              data.id,
+              payload.sn,
+              payload.msisdn,
+            );
           }
         }),
       );

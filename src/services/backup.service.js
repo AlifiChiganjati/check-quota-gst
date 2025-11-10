@@ -14,21 +14,35 @@ export default class BackupService {
 
   static async moveOldLogsToBackup(consoleId) {
     const allLogs = await BackupService.listAllLogs(consoleId);
-    if (allLogs.length > 0) {
-      for (const allLog of allLogs) {
-        const alreadylogBackup = await BackupRepository.alreadyInsertLogsBackup(
-          allLog.check_quota_id,
-          allLog.date,
-          allLog.ref,
+
+    if (allLogs.length === 0) {
+      console.log("Tidak ada data lama untuk dibackup 😌");
+      return;
+    }
+
+    for (const log of allLogs) {
+      try {
+        const alreadyBackup = await BackupRepository.alreadyInsertLogsBackup(
+          log.check_quota_id,
+          log.date,
+          log.ref,
         );
-        if (alreadylogBackup.length === 0) {
-          // console.log("belum ada backup", allLog.id);
-          return;
+
+        if (alreadyBackup.length === 0) {
+          // ⬇️ Insert ke backup
+          const [insertResult] = await BackupRepository.insertLogsBackup(log);
+          console.log(`✅ Backup sukses untuk log ID: ${log.id}`);
+          if (insertResult.affectedRows > 0) {
+            await BackupRepository.deleteLogById(log.id);
+          }
+        } else {
+          await BackupRepository.deleteLogById(log.id);
         }
+      } catch (err) {
+        console.error(`❌ Error pada log ID ${log.id}:`, err.message);
       }
     }
-  }
-  static async insertOldLogsToBackup(payload) {
-    const [] = payload;
+
+    console.log("🎉 Proses backup & delete selesai!");
   }
 }

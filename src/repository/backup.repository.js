@@ -30,4 +30,47 @@ AND ref = ?`,
     );
     return rows;
   }
+
+  static async insertLogsBackup(payload) {
+    const {
+      sn,
+      msisdn,
+      masa_tunggu_kartu,
+      value_check,
+      date_check,
+      status,
+      status_paket,
+      kuota,
+      check_quota_id,
+      date,
+      ref,
+    } = payload;
+
+    const sql = `
+  INSERT INTO gst_log_check_quota_backup
+  (sn, msisdn, masa_tunggu_kartu, value_check, date_check, status, status_paket, kuota, check_quota_id, date, ref)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
+    const values = [
+      sn,
+      msisdn,
+      masa_tunggu_kartu,
+      value_check,
+      date_check,
+      status,
+      status_paket,
+      kuota,
+      check_quota_id,
+      date,
+      ref,
+    ];
+
+    return await db.execute(sql, values);
+  }
+
+  static async deleteLogById(id) {
+    const sql = `DELETE FROM gst_log_check_quota WHERE id = ?`;
+    return await db.execute(sql, [id]);
+  }
 }
