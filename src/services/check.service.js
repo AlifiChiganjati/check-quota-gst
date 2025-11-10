@@ -238,7 +238,6 @@ export default class CheckService {
           const sisa_kuota =
             parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
 
-          const pageTitle = $("title").text().trim().toLowerCase();
           const hasInfoItem = $(".info-item").length > 0;
           const bodyText = $("body").text().trim().toLowerCase();
           let errorMessage = null;
@@ -258,23 +257,8 @@ export default class CheckService {
                 kuota: "0",
               };
             }
-
-            // Halaman lain yang tidak valid
-            if (!pageTitle.includes("sim card checking")) {
-              return {
-                id,
-                sn,
-                msisdn,
-                url: url_check,
-                statusPaket: "Error: Halaman tidak valid",
-                serialNumber: null,
-                phoneNumber: null,
-                masaTunggu: { tanggal: null, status: null },
-                value: {},
-                kuota: "0",
-              };
-            }
           }
+
           if (hasInfoItem) {
             // Pertimbangkan 'Value' valid bila ada salah satu field yang meaningful:
             const hasMeaningfulValue =
