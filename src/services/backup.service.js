@@ -20,7 +20,14 @@ export default class BackupService {
       return;
     }
 
+    let count = 0; // 🔢 Hitung jumlah log yang sudah diproses
+
     for (const log of allLogs) {
+      if (count >= 100) {
+        console.log("⚠️ Batas maksimum 100 log tercapai, hentikan proses.");
+        break;
+      }
+
       try {
         const alreadyBackup = await BackupRepository.alreadyInsertLogsBackup(
           log.check_quota_id,
@@ -32,12 +39,18 @@ export default class BackupService {
           // ⬇️ Insert ke backup
           const [insertResult] = await BackupRepository.insertLogsBackup(log);
           console.log(`✅ Backup sukses untuk log ID: ${log.id}`);
+
           if (insertResult.affectedRows > 0) {
             await BackupRepository.deleteLogById(log.id);
           }
         } else {
           await BackupRepository.deleteLogById(log.id);
         }
+
+        count++; // ⏫ Tambah counter setelah berhasil diproses
+
+        // 🕐 Delay 500ms sebelum lanjut ke log berikutnya
+        await new Promise((resolve) => setTimeout(resolve, 500));
       } catch (err) {
         console.error(`❌ Error pada log ID ${log.id}:`, err.message);
       }

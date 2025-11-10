@@ -11,7 +11,7 @@ FROM gst_log_check_quota l
 JOIN gst_check_quota AS gc
 ON l.check_quota_id = gc.id
 WHERE DATE(l.date) < CURDATE() - INTERVAL 14 DAY
-AND gc.console=1
+AND gc.console=?
 ORDER BY l.id ASC;`,
       [consoleId],
     );
