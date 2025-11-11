@@ -49,7 +49,7 @@ const processCleanupAndBackup = async (consoleId) => {
 // 🔹 Proses utama pengecekan (1 siklus penuh)
 const check = async (consoleId) => {
   console.log("🚀 Mulai proses check:", new Date().toLocaleString());
-  const MAX_CYCLE = 100;
+  const MAX_CYCLE = 10000;
 
   for (let cycle = 1; cycle <= MAX_CYCLE; cycle++) {
     let internet = await isInternetAvailable();
