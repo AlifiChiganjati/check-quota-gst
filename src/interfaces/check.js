@@ -1,6 +1,5 @@
 // interfaces/check.js
 import CheckService from "../services/check.service.js";
-import BackupService from "../services/backup.service.js";
 import dns from "dns/promises";
 
 // 🔹 Utilitas untuk cek koneksi internet
@@ -38,12 +37,11 @@ const processCheckBatch = async (consoleId) => {
 };
 
 // 🔹 Proses cleanup dan backup
-const processCleanupAndBackup = async (consoleId) => {
-  console.log("🔄 Jalankan proses cleanup & backup...");
+const processCleanup = async (consoleId) => {
+  console.log("🔄 Jalankan proses cleanup...");
   await CheckService.resetStatusFailedInsert(consoleId);
   await CheckService.resetStatusGst(consoleId);
-  await BackupService.moveOldLogsToBackup(consoleId);
-  console.log("Cleanup & backup selesai ✅");
+  console.log("Cleanup selesai ✅");
 };
 
 // 🔹 Proses utama pengecekan (1 siklus penuh)
@@ -76,7 +74,7 @@ const check = async (consoleId) => {
 
   // Setelah loop selesai, lakukan cleanup & backup sekali saja
   try {
-    await processCleanupAndBackup(consoleId);
+    await processCleanup(consoleId);
   } catch (err) {
     console.error("❌ Error saat cleanup/backup:", err);
     console.error("Stack trace:", err?.stack);

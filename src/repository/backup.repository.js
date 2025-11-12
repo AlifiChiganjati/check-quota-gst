@@ -1,19 +1,15 @@
 import db from "../config/db.js";
 
 export default class BackupRepository {
-  static async getAllLog(consoleId) {
+  static async getAllLog() {
     const [rows] = await db.query(
-      `SELECT l.id,l.sn, l.msisdn, l.masa_tunggu_kartu, 
-l.value_check, l.date_check, l.status, 
-l.status_paket, l.kuota, l.status_mutasi, 
-l.check_quota_id, l.date, l.ref
-FROM gst_log_check_quota l
-JOIN gst_check_quota AS gc
-ON l.check_quota_id = gc.id
-WHERE DATE(l.date) < CURDATE() - INTERVAL 14 DAY
-AND gc.console=?
-ORDER BY l.id ASC;`,
-      [consoleId],
+      `SELECT id, sn, msisdn, masa_tunggu_kartu,
+value_check, date_check, status, 
+status_paket, kuota, status_mutasi, 
+check_quota_id, date, ref
+FROM gst_log_check_quota 
+WHERE DATE(date) < CURDATE() - INTERVAL 14 DAY
+ORDER BY id ASC;`,
     );
     return rows;
   }

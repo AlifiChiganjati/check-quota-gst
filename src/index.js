@@ -25,6 +25,7 @@ function showMenu() {
   for (let i = 1; i <= 12; i++) {
     console.log(`  ${i}. Jalankan check consoleId = ${i}`);
   }
+  console.log(" 13. Jalankan backup data");
   console.log("=====================================");
 }
 
@@ -36,10 +37,10 @@ function startCLI() {
 
   showMenu();
 
-  rl.question("Masukkan pilihan (0–12): ", async (answer) => {
+  rl.question("Masukkan pilihan (0–13): ", async (answer) => {
     const choice = parseInt(answer.trim(), 10);
 
-    if (isNaN(choice) || choice < 0 || choice > 12) {
+    if (isNaN(choice) || choice < 0 || choice > 13) {
       console.log(
         "⚠️ Pilihan tidak valid! Masukkan angka antara 0–12 ya~ (/'3')/",
       );
@@ -50,9 +51,12 @@ function startCLI() {
     if (choice === 0) {
       console.log("▶️ Menjalankan cron_update...");
       await run("cron_update");
-    } else {
+    } else if (choice >= 1 && choice <= 12) {
       console.log(`▶️ Menjalankan check dengan consoleId=${choice}...`);
       await run("check", choice);
+    } else if (choice === 13) {
+      console.log("💾 Menjalankan backup data...");
+      await run("backup");
     }
 
     rl.close();

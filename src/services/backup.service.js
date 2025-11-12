@@ -1,10 +1,10 @@
 import BackupRepository from "../repository/backup.repository.js";
 
 export default class BackupService {
-  static async listAllLogs(consoleId) {
+  static async listAllLogs() {
     try {
       console.log("Ambil semua untuk backup");
-      const result = await BackupRepository.getAllLog(consoleId);
+      const result = await BackupRepository.getAllLog();
       console.log(`Jumlah row query yg mau di backup: ${result.length}`);
       return result;
     } catch (err) {
@@ -12,22 +12,15 @@ export default class BackupService {
     }
   }
 
-  static async moveOldLogsToBackup(consoleId) {
-    const allLogs = await BackupService.listAllLogs(consoleId);
+  static async moveOldLogsToBackup() {
+    const allLogs = await BackupService.listAllLogs();
 
     if (allLogs.length === 0) {
       console.log("Tidak ada data lama untuk dibackup 😌");
       return;
     }
 
-    let count = 0; // 🔢 Hitung jumlah log yang sudah diproses
-
     for (const log of allLogs) {
-      if (count >= 100) {
-        console.log("⚠️ Batas maksimum 100 log tercapai, hentikan proses.");
-        break;
-      }
-
       try {
         const alreadyBackup = await BackupRepository.alreadyInsertLogsBackup(
           log.check_quota_id,
@@ -46,8 +39,6 @@ export default class BackupService {
         } else {
           await BackupRepository.deleteLogById(log.id);
         }
-
-        count++; // ⏫ Tambah counter setelah berhasil diproses
 
         // 🕐 Delay 500ms sebelum lanjut ke log berikutnya
         await new Promise((resolve) => setTimeout(resolve, 500));
