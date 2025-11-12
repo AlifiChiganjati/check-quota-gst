@@ -25,7 +25,7 @@ function showMenu() {
   for (let i = 1; i <= 15; i++) {
     console.log(`  ${i}. Jalankan check consoleId = ${i}`);
   }
-  console.log(" 16. Jalankan backup data");
+  console.log("  16. Jalankan backup data");
   console.log("=====================================");
 }
 
