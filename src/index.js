@@ -37,12 +37,12 @@ function startCLI() {
 
   showMenu();
 
-  rl.question("Masukkan pilihan (0–13): ", async (answer) => {
+  rl.question("Masukkan pilihan (0–16): ", async (answer) => {
     const choice = parseInt(answer.trim(), 10);
 
     if (isNaN(choice) || choice < 0 || choice > 16) {
       console.log(
-        "⚠️ Pilihan tidak valid! Masukkan angka antara 0–12 ya~ (/'3')/",
+        "⚠️ Pilihan tidak valid! Masukkan angka antara 0–16 ya~ (/'3')/",
       );
       rl.close();
       return;
