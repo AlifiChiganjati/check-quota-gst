@@ -13,8 +13,8 @@ export default class CheckService {
 
   static async checkAllUrls(urls) {
     const results = [];
-    const limit = pLimit(3);
-    const fetchWithRetry = async (url, retries = 3) => {
+    const limit = pLimit(5);
+    const fetchWithRetry = async (url, retries = 5) => {
       for (let i = 0; i < retries; i++) {
         try {
           return await axios.get(url, {
