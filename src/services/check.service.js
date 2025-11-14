@@ -498,29 +498,6 @@ export default class CheckService {
     }
   }
 
-  static async resetStatusFailedInsert(consoleId) {
-    try {
-      console.log("Try get All failed Insert...");
-      const failedInsert =
-        await CheckRepository.getAllStatusFailedInsert(consoleId);
-      console.log(`Jumlah gagal insert ditemukan: ${failedInsert.length}`);
-
-      let result = { affectedRows: 0 }; // <-- inisialisasi aman
-
-      if (failedInsert.length > 0) {
-        result = await CheckRepository.updateStatusFailedInsert(consoleId);
-        console.log(
-          `Berhasil reset gagal insert, baris terpengaruh: ${result.affectedRows}`,
-        );
-      }
-
-      return result;
-    } catch (err) {
-      console.error("Error saat reset status gagal insert:", err);
-      throw err;
-    }
-  }
-
   static async resetStatusGst(consoleId) {
     try {
       console.log("Ambil SN dari DB...");

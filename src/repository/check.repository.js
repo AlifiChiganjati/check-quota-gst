@@ -146,22 +146,6 @@ export default class CheckRepository {
     );
   }
 
-  static async updateStatusFailedInsert(consoleId) {
-    return await db.query(
-      `UPDATE gst_check_quota SET status = 0 WHERE console = ? AND status = 2`,
-      [consoleId],
-    );
-  }
-
-  static async getAllStatusFailedInsert(consoleId) {
-    const [rows] = await db.query(
-      `
-SELECT id FROM gst_check_quota WHERE console=? AND status=2`,
-      [consoleId],
-    );
-
-    return rows;
-  }
   static async getLastRef(check_quota_id, date) {
     const [rows] = await db.query(
       `SELECT COALESCE(MAX(ref), 0) AS lastRef 
