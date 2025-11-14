@@ -39,7 +39,7 @@ const processCheckBatch = async (consoleId) => {
 // 🔹 Proses cleanup dan backup
 const processCleanup = async (consoleId) => {
   console.log("🔄 Jalankan proses cleanup...");
-  await CheckService.resetStatusFailedInsert(consoleId);
+  // await CheckService.resetStatusFailedInsert(consoleId);
   await CheckService.resetStatusGst(consoleId);
   console.log("Cleanup selesai ✅");
 };
