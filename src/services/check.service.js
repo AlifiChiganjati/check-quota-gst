@@ -13,8 +13,8 @@ export default class CheckService {
 
   static async checkAllUrls(urls) {
     const results = [];
-    const limit = pLimit(5);
-    const fetchWithRetry = async (url, retries = 5) => {
+    const limit = pLimit(3);
+    const fetchWithRetry = async (url, retries = 3) => {
       for (let i = 0; i < retries; i++) {
         try {
           return await axios.get(url, {
@@ -239,26 +239,7 @@ export default class CheckService {
             parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
 
           const hasInfoItem = $(".info-item").length > 0;
-          const bodyText = $("body").text().trim().toLowerCase();
           let errorMessage = null;
-
-          if (!hasInfoItem) {
-            if (bodyText === "success" || bodyText === "ok") {
-              return {
-                id,
-                sn,
-                msisdn,
-                url: url_check,
-                statusPaket: "Error: Response success dummy",
-                serialNumber: null,
-                phoneNumber: null,
-                masaTunggu: { tanggal: null, status: null },
-                value: {},
-                kuota: "0",
-              };
-            }
-          }
-
           if (hasInfoItem) {
             // Pertimbangkan 'Value' valid bila ada salah satu field yang meaningful:
             const hasMeaningfulValue =
@@ -285,6 +266,11 @@ export default class CheckService {
                 ? `Error: ${errorMessage}`
                 : "Error: Data tidak ditemukan";
             }
+
+            if (hasInfoItem && hasMeaningfulValue) {
+              errorMessage = null; // jangan ambil pesan <p> error
+            }
+
             // }
             // cek masa tunggu kartu: kalau tanggal dan status hilang -> error
             const tanggalMasaTungguTrim = tanggalMasaTunggu?.trim() || null;
@@ -380,21 +366,49 @@ export default class CheckService {
     console.log("start insert log");
 
     const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = 3;
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const safe = (val, fallback = null) => (val === undefined ? fallback : val);
 
+    function shouldFail(data, payload) {
+      const statusPaket = (data.statusPaket || "").toLowerCase();
+
+      // 1. Jika status "Error", otomatis gagal
+      if (statusPaket.startsWith("error")) {
+        return true;
+      }
+
+      // 2. Jika status Pending Paket → selalu sukses
+      if (statusPaket.includes("pending paket")) {
+        return false;
+      }
+
+      // 3. Jika Value tapi SN/MSISDN hilang → tetap sukses (sesuai permintaan kamu)
+      if (statusPaket === "value") {
+        return false;
+      }
+
+      // Default fallback
+      return false;
+    }
+
     // helper status update
-    const handleStatusUpdate = async (isSuccess, id, sn, msisdn) => {
-      const newStatus = isSuccess ? 4 : 2;
-      await CheckRepository.updateStatus(id, newStatus);
-      if (isSuccess) {
-        console.log(
-          `✅ MSISDN=${msisdn}, SN=${sn}, ID=${id} berhasil disimpan`,
+    const handleStatusUpdate = async (data, payload) => {
+      const isFailed = shouldFail(data, payload);
+
+      const newStatus = isFailed ? 2 : 4;
+
+      await CheckRepository.updateStatus(data.id, newStatus);
+
+      if (isFailed) {
+        console.warn(
+          `❌ [FAILED] MSISDN=${payload.msisdn}, SN=${payload.sn}, ID=${data.id}`,
         );
       } else {
-        console.warn(`❌ MSISDN=${msisdn}, SN=${sn}, ID=${id} gagal disimpan`);
+        console.log(
+          `✅ [SUCCESS] MSISDN=${payload.msisdn}, SN=${payload.sn}, ID=${data.id}`,
+        );
       }
     };
 
@@ -441,12 +455,7 @@ export default class CheckService {
             if (!alreadyInserted) {
               // insert baru
               await CheckRepository.insert(payload);
-              await handleStatusUpdate(
-                true,
-                data.id,
-                payload.sn,
-                payload.msisdn,
-              );
+              await handleStatusUpdate(data, payload);
             } else {
               // insert ulang (ref++)
               const lastRef = await CheckRepository.getLastRef(
@@ -459,21 +468,11 @@ export default class CheckService {
               console.log(
                 `🔁 Insert ulang ref=${payload.ref} untuk ID=${data.id}`,
               );
-              await handleStatusUpdate(
-                true,
-                data.id,
-                payload.sn,
-                payload.msisdn,
-              );
+              await handleStatusUpdate(data, payload);
             }
           } catch (err) {
             console.error(`Gagal insert SN=${payload.sn}:`, err.message);
-            await handleStatusUpdate(
-              false,
-              data.id,
-              payload.sn,
-              payload.msisdn,
-            );
+            await handleStatusUpdate(data, payload);
           }
         }),
       );
