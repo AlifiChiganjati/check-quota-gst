@@ -13,7 +13,7 @@ export default class CheckService {
 
   static async checkAllUrls(urls) {
     const results = [];
-    const limit = pLimit(3);
+    const limit = pLimit(5);
     const fetchWithRetry = async (url, retries = 3) => {
       for (let i = 0; i < retries; i++) {
         try {
@@ -366,7 +366,7 @@ export default class CheckService {
     console.log("start insert log");
 
     const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const BATCH_SIZE = 3;
+    const BATCH_SIZE = 5;
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const safe = (val, fallback = null) => (val === undefined ? fallback : val);

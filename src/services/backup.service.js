@@ -36,8 +36,6 @@ export default class BackupService {
           if (insertResult.affectedRows > 0) {
             await BackupRepository.deleteLogById(log.id);
           }
-        } else {
-          await BackupRepository.deleteLogById(log.id);
         }
 
         // 🕐 Delay 500ms sebelum lanjut ke log berikutnya
