@@ -1,9 +1,9 @@
 //service
 import CheckRepository from "../repository/check.repository.js";
 import * as cheerio from "cheerio";
-import axios from "axios";
 import { normalize } from "../utils/normalize.js";
 import pLimit from "p-limit";
+import { httpClient } from "../utils/httpClient.js";
 
 export default class CheckService {
   static async listUrls(consoleId) {
@@ -14,17 +14,77 @@ export default class CheckService {
   static async checkAllUrls(urls) {
     const results = [];
     const limit = pLimit(5);
+    const parseGB = (str) => {
+      if (!str) return 0;
+      const match = str.match(/(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+    const normalizeText = (txt) =>
+      (txt || "")
+        .replace(/\u00A0/g, " ") // non-breaking space
+        .replace(/\s+/g, " ") // collapse whitespace/newlines
+        .trim();
+
+    // regex fleksibel untuk cari tanggal "08 Nov 2025 16:18:59" atau "08 Nov 2025"
+    const monthMap = {
+      Jan: 0,
+      Feb: 1,
+      Mar: 2,
+      Apr: 3,
+      May: 4,
+      Jun: 5,
+      Jul: 6,
+      Aug: 7,
+      Sep: 8,
+      Oct: 9,
+      Nov: 10,
+      Dec: 11,
+    };
+    const dateRegex =
+      /(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/;
+    function parseDate(text) {
+      if (!text) return null;
+
+      // regex fleksibel untuk "08 Nov 2025 16:18:59" atau "08 Nov 2025"
+      const match = text.match(dateRegex);
+
+      if (!match) return null;
+
+      const day = parseInt(match[1], 10);
+      const monthStr = match[2];
+      const year = parseInt(match[3], 10);
+      const hour = match[4] ? parseInt(match[4], 10) : 0;
+      const minute = match[5] ? parseInt(match[5], 10) : 0;
+      const second = match[6] ? parseInt(match[6], 10) : 0;
+
+      const month = monthMap[monthStr];
+      if (month === undefined) return null;
+
+      return new Date(year, month, day, hour, minute, second);
+    }
+
+    // Format kembali ke string sama seperti fetch
+    function formatDate(date) {
+      if (!date) return "";
+      const day = date.getDate().toString().padStart(2, "0");
+      const monthStr = Object.keys(monthMap).find(
+        (k) => monthMap[k] === date.getMonth(),
+      );
+      const year = date.getFullYear();
+      const hour = date.getHours().toString().padStart(2, "0");
+      const minute = date.getMinutes().toString().padStart(2, "0");
+      const second = date.getSeconds().toString().padStart(2, "0");
+      return `${day} ${monthStr} ${year} ${hour}:${minute}:${second}`;
+    }
+
     const fetchWithRetry = async (url, retries = 3) => {
       for (let i = 0; i < retries; i++) {
         try {
-          return await axios.get(url, {
-            headers: { "User-Agent": "Mozilla/5.0 (Node.js Scraper)" },
-            timeout: 15000,
-          });
+          return await httpClient.get(url);
         } catch (err) {
           if (i === retries - 1) throw err;
           console.warn(`Retry ${i + 1} untuk ${url}...`);
-          await new Promise((r) => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 1000 * (i + 1))); // exponential-ish
         }
       }
     };
@@ -34,68 +94,6 @@ export default class CheckService {
           const response = await fetchWithRetry(url_check);
           const $ = cheerio.load(response.data);
 
-          const parseGB = (str) => {
-            if (!str) return 0;
-            const match = str.match(/(\d+)/);
-            return match ? parseInt(match[1], 10) : 0;
-          };
-          const normalizeText = (txt) =>
-            (txt || "")
-              .replace(/\u00A0/g, " ") // non-breaking space
-              .replace(/\s+/g, " ") // collapse whitespace/newlines
-              .trim();
-
-          // regex fleksibel untuk cari tanggal "08 Nov 2025 16:18:59" atau "08 Nov 2025"
-          const monthMap = {
-            Jan: 0,
-            Feb: 1,
-            Mar: 2,
-            Apr: 3,
-            May: 4,
-            Jun: 5,
-            Jul: 6,
-            Aug: 7,
-            Sep: 8,
-            Oct: 9,
-            Nov: 10,
-            Dec: 11,
-          };
-          const dateRegex =
-            /(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/;
-          function parseDate(text) {
-            if (!text) return null;
-
-            // regex fleksibel untuk "08 Nov 2025 16:18:59" atau "08 Nov 2025"
-            const match = text.match(dateRegex);
-
-            if (!match) return null;
-
-            const day = parseInt(match[1], 10);
-            const monthStr = match[2];
-            const year = parseInt(match[3], 10);
-            const hour = match[4] ? parseInt(match[4], 10) : 0;
-            const minute = match[5] ? parseInt(match[5], 10) : 0;
-            const second = match[6] ? parseInt(match[6], 10) : 0;
-
-            const month = monthMap[monthStr];
-            if (month === undefined) return null;
-
-            return new Date(year, month, day, hour, minute, second);
-          }
-
-          // Format kembali ke string sama seperti fetch
-          function formatDate(date) {
-            if (!date) return "";
-            const day = date.getDate().toString().padStart(2, "0");
-            const monthStr = Object.keys(monthMap).find(
-              (k) => monthMap[k] === date.getMonth(),
-            );
-            const year = date.getFullYear();
-            const hour = date.getHours().toString().padStart(2, "0");
-            const minute = date.getMinutes().toString().padStart(2, "0");
-            const second = date.getSeconds().toString().padStart(2, "0");
-            return `${day} ${monthStr} ${year} ${hour}:${minute}:${second}`;
-          }
           const getExactValueByTitle = (title) => {
             const item = $(".info-item").filter(
               (_, el) =>
