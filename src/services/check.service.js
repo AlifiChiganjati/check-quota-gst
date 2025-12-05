@@ -195,8 +195,8 @@ export default class CheckService {
           if (
             masaWaktu &&
             parsedDate &&
-            parsedDate.getFullYear() >= 2000 &&
-            parsedDate.getFullYear() <= 2040
+            parsedDate.getFullYear() >= 2020 &&
+            parsedDate.getFullYear() <= 2050
           ) {
             masaTungguPaket = formatDate(parsedDate);
             statusPaket = "Value";
@@ -219,8 +219,8 @@ export default class CheckService {
 
               if (
                 retryParsed &&
-                retryParsed.getFullYear() >= 2000 &&
-                retryParsed.getFullYear() <= 2040
+                retryParsed.getFullYear() >= 2020 &&
+                retryParsed.getFullYear() <= 2050
               ) {
                 masaTungguPaket = formatDate(retryParsed);
                 statusPaket = "Value";
