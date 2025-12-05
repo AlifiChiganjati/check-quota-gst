@@ -1,31 +1,30 @@
-//repository
+// repository/check.repository.js
 import db from "../config/db.js";
 
 export default class CheckRepository {
-  static async getAllUrl(consoleId) {
-    const connection = await db.getConnection(); // pastikan pool support getConnection()
+  // Keep original getAllUrl but allow limit param (fetch + set status=1 for lock)
+  static async getAllUrl(consoleId, limit = 10) {
+    const connection = await db.getConnection();
     try {
       await connection.beginTransaction();
 
-      // Ambil 5 data dengan kunci row
       const [rows] = await connection.query(
         `SELECT id, url_check, date_check, status, sn, msisdn
-       FROM gst_check_quota
-       WHERE status = 0
-       AND console=?
-       ORDER BY id ASC
-       LIMIT 10
-       FOR UPDATE`,
-        [consoleId],
+         FROM gst_check_quota
+         WHERE status = 0
+         AND console = ?
+         ORDER BY id ASC
+         LIMIT ?
+         FOR UPDATE`,
+        [consoleId, limit],
       );
 
       if (rows.length > 0) {
         const ids = rows.map((r) => r.id);
-        // update status jadi 9 supaya tidak diambil proses lain
         await connection.query(
           `UPDATE gst_check_quota 
-         SET status = 1
-         WHERE id IN (?)`,
+           SET status = 1
+           WHERE id IN (?)`,
           [ids],
         );
       }
@@ -40,7 +39,7 @@ export default class CheckRepository {
     }
   }
 
-  // Insert data ke gst_log_check_kuota
+  // Insert single row (fallback)
   static async insert(data) {
     const {
       sn,
@@ -60,7 +59,7 @@ export default class CheckRepository {
   INSERT INTO gst_log_check_quota
   (sn, msisdn, masa_tunggu_kartu, value_check, date_check, status, status_paket, kuota, check_quota_id, date, ref)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`; // <--- 11 placeholder
+`;
 
     const values = [
       sn,
@@ -77,6 +76,79 @@ export default class CheckRepository {
     ];
 
     return await db.execute(sql, values);
+  }
+
+  // Bulk insert optimized
+  static async insertBulk(batch) {
+    if (!Array.isArray(batch) || batch.length === 0) return null;
+
+    const cols = [
+      "sn",
+      "msisdn",
+      "masa_tunggu_kartu",
+      "value_check",
+      "date_check",
+      "status",
+      "status_paket",
+      "kuota",
+      "check_quota_id",
+      "date",
+      "ref",
+    ];
+
+    const placeholdersPerRow = "(" + cols.map(() => "?").join(",") + ")";
+    const placeholders = new Array(batch.length)
+      .fill(placeholdersPerRow)
+      .join(",");
+
+    const sql = `INSERT INTO gst_log_check_quota (${cols.join(",")}) VALUES ${placeholders}`;
+
+    const values = [];
+    for (const row of batch) {
+      values.push(
+        row.sn ?? null,
+        row.msisdn ?? null,
+        row.masa_tunggu_kartu ?? null,
+        JSON.stringify(row.value_check ?? null),
+        row.date_check ?? null,
+        row.status ?? null,
+        row.status_paket ?? null,
+        row.kuota ?? null,
+        row.check_quota_id ?? null,
+        row.date ?? null,
+        row.ref ?? 1,
+      );
+    }
+
+    // Use pool.query for large placeholders
+    return await db.query(sql, values);
+  }
+
+  // Batch check existing rows for today for given ids
+  static async getExistingLogs(checkQuotaIds, date) {
+    if (!Array.isArray(checkQuotaIds) || checkQuotaIds.length === 0) return [];
+    const sql = `
+      SELECT DISTINCT check_quota_id
+      FROM gst_log_check_quota
+      WHERE date = ?
+      AND check_quota_id IN (?)
+    `;
+    const [rows] = await db.query(sql, [date, checkQuotaIds]);
+    return rows;
+  }
+
+  // Batch get lastRef per check_quota_id for date
+  static async getLastRefs(checkQuotaIds, date) {
+    if (!Array.isArray(checkQuotaIds) || checkQuotaIds.length === 0) return [];
+    const sql = `
+      SELECT check_quota_id, COALESCE(MAX(ref), 0) AS lastRef
+      FROM gst_log_check_quota
+      WHERE date = ?
+      AND check_quota_id IN (?)
+      GROUP BY check_quota_id
+    `;
+    const [rows] = await db.query(sql, [date, checkQuotaIds]);
+    return rows;
   }
 
   static async isAlreadyInserted(check_gst_id, date) {
@@ -102,7 +174,6 @@ export default class CheckRepository {
     }
   }
 
-  // repository/check.repository.js
   static async resetStuck(consoleId) {
     try {
       const [result] = await db.query(
@@ -130,7 +201,7 @@ export default class CheckRepository {
   }
 
   static async updateAllResetGst(consoleId) {
-    [result] = await db.query(
+    const [result] = await db.query(
       `UPDATE gst_check_quota 
          SET status = 0 
          WHERE status = 3 AND console = ?`,
@@ -146,6 +217,26 @@ export default class CheckRepository {
     );
   }
 
+  // Bulk update statuses (id -> newStatus) using single UPDATE CASE WHEN
+  static async bulkUpdateStatuses(pairs) {
+    if (!Array.isArray(pairs) || pairs.length === 0) return null;
+    // pairs: [{id, newStatus}, ...]
+    const ids = pairs.map((p) => p.id);
+    const cases = pairs
+      .map((p) => `WHEN ${p.id} THEN ${p.newStatus}`)
+      .join(" ");
+    const sql = `
+      UPDATE gst_check_quota
+      SET status = CASE id
+        ${cases}
+        ELSE status
+      END
+      WHERE id IN (?)
+    `;
+    const [result] = await db.query(sql, [ids]);
+    return result;
+  }
+
   static async getLastRef(check_quota_id, date) {
     const [rows] = await db.query(
       `SELECT COALESCE(MAX(ref), 0) AS lastRef 
@@ -154,5 +245,51 @@ export default class CheckRepository {
       [check_quota_id, date],
     );
     return rows[0]?.lastRef || 0;
+  }
+
+  static async getAllGstError(consoleId) {
+    const [rows] = await db.query(
+      `SELECT l.check_quota_id
+FROM gst_log_check_quota AS l
+JOIN gst_check_quota AS c 
+    ON l.check_quota_id = c.id
+WHERE l.status_paket NOT IN (
+    'Pending Paket',
+    'Value',
+    'Error: Data tidak ditemukan',
+    'Error: SN and MSISDN Tidak ditemukan',
+    'Error: MSISDN Tidak ditemukan'
+)
+AND l.date = CURDATE()
+AND c.console=?
+AND c.status=2;
+`,
+      [consoleId],
+    );
+    return rows;
+  }
+
+  static async resetAllGstErrorToZero(consoleId) {
+    const errorRows = await this.getAllGstError(consoleId);
+
+    if (!errorRows || errorRows.length === 0) {
+      return { affectedRows: 0, message: "No abnormal errors found" };
+    }
+    const ids = errorRows.map((r) => r.check_quota_id);
+    console.log(ids);
+
+    const sql = `
+      UPDATE gst_check_quota
+      SET status = 3
+      WHERE status = 2
+      AND console = ?
+      AND id IN (?)
+  `;
+
+    const [result] = await db.query(sql, [consoleId, ids]);
+    return {
+      found: errorRows.length,
+      affectedRows: result.affectedRows,
+    };
   }
 }

@@ -1,8 +1,7 @@
-// interfaces/check.js
+// ---------- interfaces/check.js (optimized runner) ----------
 import CheckService from "../services/check.service.js";
 import dns from "dns/promises";
 
-// 🔹 Utilitas untuk cek koneksi internet
 const isInternetAvailable = async () => {
   try {
     await dns.lookup("google.com");
@@ -12,10 +11,8 @@ const isInternetAvailable = async () => {
   }
 };
 
-// 🔹 Helper: tunggu beberapa milidetik
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// 🔹 Proses batch utama: ambil URL, check, dan insert
 const processCheckBatch = async (consoleId) => {
   console.log("Ambil URL dari DB...");
   const urls = await CheckService.listUrls(consoleId);
@@ -27,23 +24,35 @@ const processCheckBatch = async (consoleId) => {
   }
 
   console.log(`Cek ${urls.length} URL...`);
-  const checked = await CheckService.checkAllUrls(urls);
+
+  // pass optimized options: higher concurrency + tuned rps
+  const checked = await CheckService.checkAllUrls(urls, {
+    concurrency: 80,
+    rps: 40,
+  });
 
   console.log("Insert hasil ke DB...");
-  await CheckService.insertDB(checked);
+  await CheckService.insertDB(checked, { batchSize: 1000 });
 
   console.log("Batch selesai ✅");
   return true;
 };
 
-// 🔹 Proses cleanup dan backup
 const processCleanup = async (consoleId) => {
   console.log("🔄 Jalankan proses cleanup...");
-  await CheckService.resetStatusGst(consoleId);
+
+  const resetStuck = await CheckService.resetStatusGst(consoleId);
+  const resetStuckCount = resetStuck?.affectedRows ?? 0;
+
+  console.log(`Reset stuck status=1 → 0: ${resetStuckCount}`);
+  // Ambil hasil reset error abnormal
+  const resetResult = await CheckService.resetAllErrorToZero(consoleId);
+  console.log(`🟡 Ditemukan error abnormal: ${resetResult.found}`);
+  console.log(`🟢 Berhasil reset status=3 → 0: ${resetResult.affectedRows}`);
+
   console.log("Cleanup selesai ✅");
 };
 
-// 🔹 Proses utama pengecekan (1 siklus penuh)
 const check = async (consoleId) => {
   console.log("🚀 Mulai proses check:", new Date().toLocaleString());
   const MAX_CYCLE = 10000;
@@ -71,7 +80,6 @@ const check = async (consoleId) => {
     }
   }
 
-  // Setelah loop selesai, lakukan cleanup & backup sekali saja
   try {
     await processCleanup(consoleId);
   } catch (err) {
@@ -85,7 +93,6 @@ const check = async (consoleId) => {
   );
 };
 
-// 🔹 Jalankan loop pengecekan otomatis tiap 3 menit
 const runCheck = async (consoleId) => {
   let internet = await isInternetAvailable();
   while (!internet) {

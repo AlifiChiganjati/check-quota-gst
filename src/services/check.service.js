@@ -1,31 +1,60 @@
-//service
+// service/check.service.js
 import CheckRepository from "../repository/check.repository.js";
 import * as cheerio from "cheerio";
 import { normalize } from "../utils/normalize.js";
 import pLimit from "p-limit";
 import { httpClient } from "../utils/httpClient.js";
 
+class RateLimiter {
+  constructor(permitsPerSecond = 30) {
+    this.permitsPerSecond = permitsPerSecond;
+    this.tokens = permitsPerSecond;
+    this.lastRefill = Date.now();
+  }
+  _refill() {
+    const now = Date.now();
+    const elapsed = now - this.lastRefill;
+    if (elapsed > 0) {
+      const add = (elapsed / 1000) * this.permitsPerSecond;
+      this.tokens = Math.min(this.permitsPerSecond, this.tokens + add);
+      this.lastRefill = now;
+    }
+  }
+  async removeToken() {
+    while (true) {
+      this._refill();
+      if (this.tokens >= 1) {
+        this.tokens -= 1;
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+}
+
 export default class CheckService {
-  static async listUrls(consoleId) {
-    const result = await CheckRepository.getAllUrl(consoleId);
-    return result;
+  static async listUrls(consoleId, limit = 10) {
+    return await CheckRepository.getAllUrl(consoleId, limit);
   }
 
-  static async checkAllUrls(urls) {
+  static async checkAllUrls(urls, opts = {}) {
     const results = [];
-    const limit = pLimit(5);
+    const concurrency = opts.concurrency ?? 50;
+    const limit = pLimit(concurrency);
+    const rateLimiter = opts.rateLimiter ?? new RateLimiter(opts.rps ?? 30);
+
     const parseGB = (str) => {
       if (!str) return 0;
       const match = str.match(/(\d+)/);
       return match ? parseInt(match[1], 10) : 0;
     };
+
     const normalizeText = (txt) =>
       (txt || "")
-        .replace(/\u00A0/g, " ") // non-breaking space
-        .replace(/\s+/g, " ") // collapse whitespace/newlines
+        .replace(/\u00A0/g, " ")
+        .replace(/\s+/g, " ")
         .trim();
 
-    // regex fleksibel untuk cari tanggal "08 Nov 2025 16:18:59" atau "08 Nov 2025"
     const monthMap = {
       Jan: 0,
       Feb: 1,
@@ -44,26 +73,18 @@ export default class CheckService {
       /(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/;
     function parseDate(text) {
       if (!text) return null;
-
-      // regex fleksibel untuk "08 Nov 2025 16:18:59" atau "08 Nov 2025"
       const match = text.match(dateRegex);
-
       if (!match) return null;
-
       const day = parseInt(match[1], 10);
       const monthStr = match[2];
       const year = parseInt(match[3], 10);
       const hour = match[4] ? parseInt(match[4], 10) : 0;
       const minute = match[5] ? parseInt(match[5], 10) : 0;
       const second = match[6] ? parseInt(match[6], 10) : 0;
-
       const month = monthMap[monthStr];
       if (month === undefined) return null;
-
       return new Date(year, month, day, hour, minute, second);
     }
-
-    // Format kembali ke string sama seperti fetch
     function formatDate(date) {
       if (!date) return "";
       const day = date.getDate().toString().padStart(2, "0");
@@ -80,14 +101,16 @@ export default class CheckService {
     const fetchWithRetry = async (url, retries = 3) => {
       for (let i = 0; i < retries; i++) {
         try {
+          await rateLimiter.removeToken();
           return await httpClient.get(url);
         } catch (err) {
           if (i === retries - 1) throw err;
           console.warn(`Retry ${i + 1} untuk ${url}...`);
-          await new Promise((r) => setTimeout(r, 1000 * (i + 1))); // exponential-ish
+          await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
         }
       }
     };
+
     const tasks = urls.map(({ id, url_check, sn, msisdn }) =>
       limit(async () => {
         try {
@@ -124,12 +147,10 @@ export default class CheckService {
             (_, el) => $(el).find(".title").text().trim() === "Value",
           );
 
-          // fallback: kalau tidak ketemu, cari tbody langsung
           if (valueItem.length === 0) {
             valueItem = $("tbody");
           }
           const getValueRow = (rowTitle) => {
-            // ambil semua tr di dalam valueItem
             const rows = valueItem.find("tr");
             let foundText = "";
 
@@ -137,9 +158,8 @@ export default class CheckService {
               const titleTd = $(el).find("td.other-title").text();
               const title = normalizeText(titleTd).toLowerCase();
               if (title.includes(rowTitle.toLowerCase())) {
-                // ambil ONLY the first matching row's other-value, normalized
                 foundText = normalizeText($(el).find("td.other-value").text());
-                return false; // break out of .each
+                return false;
               }
             });
 
@@ -161,26 +181,23 @@ export default class CheckService {
 
             return foundText || "";
           };
-          const masaWaktu = getValueRow("Masa Waktu"); // "60 hari" atau ""
+          const masaWaktu = getValueRow("Masa Waktu");
           const kuotaNasional = getValueRow("Kuota Nasional");
           const kuotaLokal = getValueRow("Kuota Lokal");
           const lainnya = getValueRow("Lainnya");
 
-          // --- parsing tanggal awal
           const rawMasaTungguPaketText = getValueRow("Masa Tunggu Paket");
           let parsedDate = parseDate(rawMasaTungguPaketText);
 
           let masaTungguPaket = "";
           let statusPaket = "";
 
-          // cek validitas awal
           if (
             masaWaktu &&
             parsedDate &&
             parsedDate.getFullYear() >= 2000 &&
             parsedDate.getFullYear() <= 2040
           ) {
-            // tanggal valid, langsung pakai
             masaTungguPaket = formatDate(parsedDate);
             statusPaket = "Value";
           } else {
@@ -189,7 +206,6 @@ export default class CheckService {
             );
 
             try {
-              // 🔁 retry 1x halaman untuk memastikan
               const retryResponse = await fetchWithRetry(url_check);
               const $$ = cheerio.load(retryResponse.data);
 
@@ -206,14 +222,12 @@ export default class CheckService {
                 retryParsed.getFullYear() >= 2000 &&
                 retryParsed.getFullYear() <= 2040
               ) {
-                // berhasil parse tanggal di retry
                 masaTungguPaket = formatDate(retryParsed);
                 statusPaket = "Value";
                 console.info(
                   `✅ Tanggal berhasil diperbaiki untuk msisdn=${msisdn}`,
                 );
               } else {
-                // gagal valid di retry
                 masaTungguPaket = retryText || rawMasaTungguPaketText;
                 statusPaket = `Error: tanggal tidak valid (setelah recheck)`;
               }
@@ -226,7 +240,6 @@ export default class CheckService {
           const kuotaPending = getPendingRow("Kuota");
           const redeemPending = getPendingRow("Dapat di redeem hingga");
 
-          // kuotaValue from pending: ambil first "XX GB" occurrence (jika ada)
           let kuotaValue = 0;
           if (kuotaPending && !kuotaPending.includes("InternetMAX")) {
             const match = kuotaPending.match(/(\d+)\s*GB/i);
@@ -239,7 +252,6 @@ export default class CheckService {
           const hasInfoItem = $(".info-item").length > 0;
           let errorMessage = null;
           if (hasInfoItem) {
-            // Pertimbangkan 'Value' valid bila ada salah satu field yang meaningful:
             const hasMeaningfulValue =
               (masaWaktu && masaWaktu.length > 0) ||
               parseGB(kuotaNasional) > 0 ||
@@ -249,7 +261,6 @@ export default class CheckService {
                 (dateRegex.test(rawMasaTungguPaketText) ||
                   rawMasaTungguPaketText.trim().length > 0));
 
-            // if (!statusPaket.startsWith("Error")) {
             if (hasMeaningfulValue) {
               statusPaket = "Value";
             } else if (
@@ -258,7 +269,6 @@ export default class CheckService {
             ) {
               statusPaket = "Pending Paket";
             } else {
-              // fallback: coba ambil pesan <p> jika ada (halaman error)
               errorMessage = $("p").first().text().trim() || null;
               statusPaket = errorMessage
                 ? `Error: ${errorMessage}`
@@ -266,11 +276,9 @@ export default class CheckService {
             }
 
             if (hasInfoItem && hasMeaningfulValue) {
-              errorMessage = null; // jangan ambil pesan <p> error
+              errorMessage = null;
             }
 
-            // }
-            // cek masa tunggu kartu: kalau tanggal dan status hilang -> error
             const tanggalMasaTungguTrim = tanggalMasaTunggu?.trim() || null;
             const statusMasaTungguTrim = statusMasaTunggu?.trim() || null;
             if (
@@ -289,6 +297,7 @@ export default class CheckService {
               ? `Error: ${errorMessage}`
               : "Error: Data tidak ditemukan";
           }
+
           if (masaWaktu) {
             return {
               id,
@@ -360,129 +369,225 @@ export default class CheckService {
     return results;
   }
 
-  static async insertDB(results) {
-    console.log("start insert log");
+  // ----------------------------
+  // insertDB: optimized batch path
+  // ----------------------------
+  static async insertDB(results, opts = {}) {
+    console.log("start insert log (batch-optimized)");
 
-    const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = opts.batchSize ?? 1000;
+    const parallelProcess = opts.parallelProcess ?? 50;
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
     const safe = (val, fallback = null) => (val === undefined ? fallback : val);
 
-    function shouldFail(data, payload) {
+    function shouldFail(data) {
       const statusPaket = (data.statusPaket || "").toLowerCase();
 
-      // 1. Jika status "Error", otomatis gagal
       if (statusPaket.startsWith("error")) {
         return true;
       }
-
-      // 2. Jika status Pending Paket → selalu sukses
       if (statusPaket.includes("pending paket")) {
         return false;
       }
-
-      // 3. Jika Value tapi SN/MSISDN hilang → tetap sukses (sesuai permintaan kamu)
       if (statusPaket === "value") {
         return false;
       }
-
-      // Default fallback
       return false;
     }
 
-    // helper status update
-    const handleStatusUpdate = async (data, payload) => {
-      const isFailed = shouldFail(data, payload);
+    // prepare normalized minimal payloads (lightweight)
+    const normalized = results.map((data) => {
+      const sn = safe(normalize(data.serialNumber, data.sn), null);
+      const msisdn = safe(normalize(data.phoneNumber, data.msisdn), null);
+      const masaTungguTanggal = safe(
+        normalize(data.masaTunggu?.tanggal, null),
+        null,
+      );
+      const status = safe(normalize(data.masaTunggu?.status, null), null);
+      const statusPaket = safe(normalize(data.statusPaket, null), null);
+      const kuota = safe(normalize(data.kuota, "0"), "0");
+      const check_quota_id = safe(data.id, null);
 
-      const newStatus = isFailed ? 2 : 4;
+      const value_check =
+        data.value && Object.keys(data.value).length > 0
+          ? data.value
+          : { message: "coba periksa url", sn, msisdn };
 
-      await CheckRepository.updateStatus(data.id, newStatus);
+      return {
+        id: data.id,
+        sn,
+        msisdn,
+        masa_tunggu_kartu: masaTungguTanggal,
+        status,
+        status_paket: statusPaket,
+        kuota,
+        check_quota_id,
+        value_check,
+        date: today,
+        date_check: new Date(),
+        // will fill ref later
+        ref: 1,
+        isFailed: shouldFail(data),
+      };
+    });
 
-      if (isFailed) {
-        console.warn(
-          `❌ [FAILED] MSISDN=${payload.msisdn}, SN=${payload.sn}, ID=${data.id}`,
+    // 1) batch prefetch: find which (check_quota_id, date) already exist
+    const checkQuotaIds = [
+      ...new Set(
+        normalized.map((r) => r.check_quota_id).filter((x) => x != null),
+      ),
+    ];
+
+    // map of check_quota_id -> boolean (exists today)
+    let existingMap = {};
+    if (checkQuotaIds.length > 0) {
+      try {
+        const existingRows = await CheckRepository.getExistingLogs(
+          checkQuotaIds,
+          today,
         );
-      } else {
-        console.log(
-          `✅ [SUCCESS] MSISDN=${payload.msisdn}, SN=${payload.sn}, ID=${data.id}`,
+        // existingRows: array of { check_quota_id, date, count }
+        existingMap = existingRows.reduce((acc, row) => {
+          acc[String(row.check_quota_id)] = true;
+          return acc;
+        }, {});
+      } catch (err) {
+        console.error("Error prefetch existing logs:", err.message);
+        existingMap = {};
+      }
+    }
+
+    // 2) batch prefetch lastRef per check_quota_id
+    let lastRefMap = {};
+    if (checkQuotaIds.length > 0) {
+      try {
+        const lastRefs = await CheckRepository.getLastRefs(
+          checkQuotaIds,
+          today,
         );
+        // lastRefs: array of { check_quota_id, lastRef }
+        lastRefMap = lastRefs.reduce((acc, row) => {
+          acc[String(row.check_quota_id)] = row.lastRef || 0;
+          return acc;
+        }, {});
+      } catch (err) {
+        console.error("Error prefetch lastRef:", err.message);
+        lastRefMap = {};
+      }
+    }
+
+    // 3) assign refs in-memory — preserve ordering per check_quota_id
+    const perIdCounter = {}; // map id -> counter for current run
+    for (const item of normalized) {
+      const id = String(item.check_quota_id);
+      const base = parseInt(lastRefMap[id] || 0, 10);
+      if (!perIdCounter[id]) perIdCounter[id] = 0;
+      perIdCounter[id] += 1;
+      // if already exists in db, we still insert as new ref = base + counter
+      item.ref = base + perIdCounter[id];
+    }
+
+    // 4) Build batches and insert in bulk (with retry strategy)
+    const buffer = [];
+    const bulkInsertChunk = async (rowsChunk) => {
+      if (!rowsChunk || rowsChunk.length === 0) return;
+      try {
+        await CheckRepository.insertBulk(rowsChunk);
+      } catch (err) {
+        console.error("Bulk insert failed:", err.message);
+        // fallback: per-row insert with retry
+        for (const row of rowsChunk) {
+          let tries = 0;
+          const maxTries = 3;
+          while (tries < maxTries) {
+            tries++;
+            try {
+              await CheckRepository.insert(row);
+              break;
+            } catch (e) {
+              console.error(
+                `Fallback insert failed (try=${tries}) for sn=${row.sn}:`,
+                e.message,
+              );
+              if (tries >= maxTries) {
+                console.error("Giving up for row:", row);
+              } else {
+                await new Promise((r) => setTimeout(r, 500 * tries));
+              }
+            }
+          }
+        }
       }
     };
 
-    for (let i = 0; i < results.length; i += BATCH_SIZE) {
-      const batch = results.slice(i, i + BATCH_SIZE);
+    // 5) prepare status update pairs for bulk status update (id -> newStatus)
+    // determine new status per check_quota row: isFailed => 2 else 4, but if pending paket then keep 1? original logic: pending paket => false (not failed) => newStatus=4
+    const statusPairs = []; // { id, newStatus }
+    for (const item of normalized) {
+      const newStatus = item.isFailed ? 2 : 4;
+      statusPairs.push({ id: item.id, newStatus });
+    }
 
-      await Promise.all(
-        batch.map(async (data) => {
-          const sn = safe(normalize(data.serialNumber, data.sn), null);
-          const msisdn = safe(normalize(data.phoneNumber, data.msisdn), null);
-          const masaTungguTanggal = safe(
-            normalize(data.masaTunggu?.tanggal, null),
-            null,
+    // 6) Streaming insertion: flush when buffer reaches BATCH_SIZE
+    for (const item of normalized) {
+      const toInsert = {
+        sn: item.sn,
+        msisdn: item.msisdn,
+        masa_tunggu_kartu: item.masa_tunggu_kartu,
+        value_check: item.value_check,
+        date_check: item.date_check,
+        status: item.status,
+        status_paket: item.status_paket,
+        kuota: item.kuota,
+        check_quota_id: item.check_quota_id,
+        date: item.date,
+        ref: item.ref,
+      };
+      buffer.push(toInsert);
+      if (buffer.length >= BATCH_SIZE) {
+        const chunk = buffer.splice(0, BATCH_SIZE);
+        await bulkInsertChunk(chunk);
+      }
+    }
+
+    // flush remaining
+    if (buffer.length > 0) {
+      await bulkInsertChunk(buffer.splice(0, buffer.length));
+    }
+
+    // 7) bulk update statuses using single query (CASE WHEN)
+    try {
+      // compress statusPairs by id (last wins)
+      const mapPairs = {};
+      for (const p of statusPairs) mapPairs[p.id] = p.newStatus;
+      const pairs = Object.entries(mapPairs).map(([id, newStatus]) => ({
+        id: Number(id),
+        newStatus,
+      }));
+      if (pairs.length > 0) {
+        await CheckRepository.bulkUpdateStatuses(pairs);
+      }
+    } catch (err) {
+      console.error("Bulk status update failed:", err.message);
+      // fallback: per-row update
+      for (const p of statusPairs) {
+        try {
+          await CheckRepository.updateStatus(p.id, p.newStatus);
+        } catch (e) {
+          console.error(
+            `Fallback status update failed for id=${p.id}:`,
+            e.message,
           );
-          const status = safe(normalize(data.masaTunggu?.status, null), null);
-          const statusPaket = safe(normalize(data.statusPaket, null), null);
-          const kuota = safe(normalize(data.kuota, "0"), "0");
-          const check_quota_id = safe(data.id, null);
-
-          const value_check =
-            data.value && Object.keys(data.value).length > 0
-              ? data.value
-              : { message: "coba periksa url", sn, msisdn };
-
-          const payload = {
-            sn,
-            msisdn,
-            masa_tunggu_kartu: masaTungguTanggal,
-            value_check,
-            date_check: new Date(),
-            status,
-            status_paket: statusPaket,
-            kuota,
-            check_quota_id,
-            date: today,
-          };
-
-          try {
-            const alreadyInserted = await CheckRepository.isAlreadyInserted(
-              payload.check_quota_id,
-              payload.date,
-            );
-
-            if (!alreadyInserted) {
-              // insert baru
-              await CheckRepository.insert(payload);
-              await handleStatusUpdate(data, payload);
-            } else {
-              // insert ulang (ref++)
-              const lastRef = await CheckRepository.getLastRef(
-                payload.check_quota_id,
-                payload.date,
-              );
-              payload.ref = lastRef + 1;
-
-              await CheckRepository.insert(payload);
-              console.log(
-                `🔁 Insert ulang ref=${payload.ref} untuk ID=${data.id}`,
-              );
-              await handleStatusUpdate(data, payload);
-            }
-          } catch (err) {
-            console.error(`Gagal insert SN=${payload.sn}:`, err.message);
-            await handleStatusUpdate(data, payload);
-          }
-        }),
-      );
-
-      if (i + BATCH_SIZE < results.length) {
-        await delay(1000);
+        }
       }
     }
 
     console.log("Insert batch selesai ✅");
   }
 
+  // keep other methods as-is (updateStatus, resetStatusGst, listResetGst, resetStatusGstStuck)
   static async updateStatus() {
     try {
       const result = await CheckRepository.updateGst();
@@ -503,7 +608,7 @@ export default class CheckService {
 
       console.log("Jumlah SN Direset:", allResetGst.length);
 
-      let result = null; // <-- inisialisasi di awal
+      let result = null;
 
       if (allResetGst.length > 0) {
         console.log(`Ada data yg di reset ${allResetGst.length}`);
@@ -521,6 +626,7 @@ export default class CheckService {
     const result = await CheckRepository.getAllResetGst(consoleId);
     return result;
   }
+
   static async resetStatusGstStuck(consoleId) {
     try {
       const result = await CheckRepository.resetStuck(consoleId);
@@ -528,6 +634,23 @@ export default class CheckService {
       return result;
     } catch (error) {
       console.log("Error: ", error);
+    }
+  }
+
+  static async resetAllErrorToZero(consoleId) {
+    try {
+      const result = await CheckRepository.resetAllGstErrorToZero(consoleId);
+      if (result.affectedRows === 0) {
+        console.log(result);
+      }
+
+      console.log(
+        `Reset abnormal errors -> 0 (found: ${result.found}, updated: ${result.affectedRows})`,
+      );
+      return result;
+    } catch (error) {
+      console.error("resetAllErrorToZero ERROR:", error);
+      throw error;
     }
   }
 }
