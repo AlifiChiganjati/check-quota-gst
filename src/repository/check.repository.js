@@ -250,20 +250,21 @@ export default class CheckRepository {
   static async getAllGstError(consoleId) {
     const [rows] = await db.query(
       `SELECT l.check_quota_id
-FROM gst_log_check_quota AS l
-JOIN gst_check_quota AS c 
-    ON l.check_quota_id = c.id
-WHERE l.status_paket NOT IN (
-    'Pending Paket',
-    'Value',
-    'Error: Data tidak ditemukan',
-    'Error: SN and MSISDN Tidak ditemukan',
-    'Error: MSISDN Tidak ditemukan'
-)
-AND l.date = CURDATE()
-AND c.console=?
-AND c.status=2;
-`,
+  FROM gst_log_check_quota AS l
+  JOIN gst_check_quota AS c
+      ON l.check_quota_id = c.id
+  WHERE l.status_paket NOT IN (
+      'Pending Paket',
+      'Value',
+      'Error: Data tidak ditemukan',
+      'Error: SN and MSISDN Tidak ditemukan',
+      'Error: MSISDN Tidak ditemukan',
+      Error: Mohon Maaf, Terjadi kesalahan saat melakukan simcard checking!
+  )
+  AND l.date = CURDATE()
+  AND c.console=?
+  AND c.status=2;
+  `,
       [consoleId],
     );
     return rows;
@@ -279,12 +280,12 @@ AND c.status=2;
     console.log(ids);
 
     const sql = `
-      UPDATE gst_check_quota
-      SET status = 3
-      WHERE status = 2
-      AND console = ?
-      AND id IN (?)
-  `;
+        UPDATE gst_check_quota
+        SET status = 3
+        WHERE status = 2
+        AND console = ?
+        AND id IN (?)
+    `;
 
     const [result] = await db.query(sql, [consoleId, ids]);
     return {

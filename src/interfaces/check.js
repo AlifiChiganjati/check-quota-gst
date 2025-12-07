@@ -45,23 +45,24 @@ const processCleanup = async (consoleId) => {
   const resetStuckCount = resetStuck?.affectedRows ?? 0;
 
   console.log(`Reset stuck status=1 → 0: ${resetStuckCount}`);
+
   // Ambil hasil reset error abnormal
-  const resetResult = await CheckService.resetAllErrorToZero(consoleId);
-  console.log(`🟡 Ditemukan error abnormal: ${resetResult.found}`);
-  console.log(`🟢 Berhasil reset status=3 → 0: ${resetResult.affectedRows}`);
+  // const resetResult = await CheckService.resetAllErrorToZero(consoleId);
+  // console.log(`🟡 Ditemukan error abnormal: ${resetResult.found}`);
+  // console.log(`🟢 Berhasil reset status=3 → 0: ${resetResult.affectedRows}`);
 
   console.log("Cleanup selesai ✅");
 };
 
 const check = async (consoleId) => {
   console.log("🚀 Mulai proses check:", new Date().toLocaleString());
-  const MAX_CYCLE = 10000;
+  const MAX_CYCLE = 15000;
 
   for (let cycle = 1; cycle <= MAX_CYCLE; cycle++) {
     let internet = await isInternetAvailable();
     while (!internet) {
-      console.log("⚠️ Internet mati, menunggu 10 detik...");
-      await delay(10000);
+      console.log("⚠️ Internet mati, menunggu 5 detik...");
+      await delay(5000);
       internet = await isInternetAvailable();
     }
 
@@ -83,7 +84,7 @@ const check = async (consoleId) => {
   try {
     await processCleanup(consoleId);
   } catch (err) {
-    console.error("❌ Error saat cleanup/backup:", err);
+    console.error("❌ Error saat cleanup", err);
     console.error("Stack trace:", err?.stack);
   }
 
@@ -96,15 +97,15 @@ const check = async (consoleId) => {
 const runCheck = async (consoleId) => {
   let internet = await isInternetAvailable();
   while (!internet) {
-    console.log("⚠️ Internet mati sebelum runCheck, menunggu 10 detik...");
-    await delay(10000);
+    console.log("⚠️ Internet mati sebelum runCheck, menunggu 5 detik...");
+    await delay(5000);
     internet = await isInternetAvailable();
   }
 
   await check(consoleId);
 
-  console.log("🕒 Tunggu 3 menit untuk run berikutnya...");
-  setTimeout(() => runCheck(consoleId), 3 * 60 * 1000);
+  console.log("🕒 Tunggu 2 menit untuk run berikutnya...");
+  setTimeout(() => runCheck(consoleId), 2 * 60 * 1000);
 };
 
 export default runCheck;
