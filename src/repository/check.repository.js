@@ -2,32 +2,46 @@
 import db from "../config/db.js";
 
 export default class CheckRepository {
-  // Keep original getAllUrl but allow limit param (fetch + set status=1 for lock)
   static async getAllUrl(consoleId, limit = 10) {
     const connection = await db.getConnection();
+
     try {
       await connection.beginTransaction();
 
-      const [rows] = await connection.query(
-        `SELECT id, url_check, date_check, status, sn, msisdn
-         FROM gst_check_quota
-         WHERE status = 0
+      // STEP 1 — SELECT ID MASIH CEPAT (pakai index)
+      const [idRows] = await connection.query(
+        `SELECT id 
+       FROM gst_check_quota
+       WHERE status = 0
          AND console = ?
-         ORDER BY id ASC
-         LIMIT ?
-         FOR UPDATE`,
+       ORDER BY id ASC
+       LIMIT ?`,
         [consoleId, limit],
       );
 
-      if (rows.length > 0) {
-        const ids = rows.map((r) => r.id);
-        await connection.query(
-          `UPDATE gst_check_quota 
-           SET status = 1
-           WHERE id IN (?)`,
-          [ids],
-        );
+      if (idRows.length === 0) {
+        await connection.commit();
+        return [];
       }
+
+      const ids = idRows.map((r) => r.id);
+
+      // STEP 2 — UPDATE cepat via IN (...)
+      await connection.query(
+        `UPDATE gst_check_quota
+       SET status = 1
+       WHERE id IN (?)`,
+        [ids],
+      );
+
+      // STEP 3 — SELECT data lengkapnya
+      const [rows] = await connection.query(
+        `SELECT id, url_check, date_check, status, sn, msisdn
+       FROM gst_check_quota
+       WHERE id IN (?)
+       ORDER BY id ASC`,
+        [ids],
+      );
 
       await connection.commit();
       return rows;
@@ -39,7 +53,6 @@ export default class CheckRepository {
     }
   }
 
-  // Insert single row (fallback)
   static async insert(data) {
     const {
       sn,
