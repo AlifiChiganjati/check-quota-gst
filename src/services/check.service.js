@@ -71,6 +71,15 @@ export default class CheckService {
     };
     const dateRegex =
       /(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/;
+    function safeParseDate(text) {
+      if (!text) return null;
+      const match = text.match(dateRegex);
+      if (!match) return null;
+      const year = parseInt(match[3], 10);
+      if (year < 2020 || year > 2050) return null;
+      return parseDate(text);
+    }
+
     function parseDate(text) {
       if (!text) return null;
       const match = text.match(dateRegex);
@@ -238,7 +247,30 @@ export default class CheckService {
           }
 
           const kuotaPending = getPendingRow("Kuota");
-          const redeemPending = getPendingRow("Dapat di redeem hingga");
+          let redeemPendingRaw = getPendingRow("Dapat di redeem hingga");
+          let redeemPending = redeemPendingRaw;
+
+          let parsedRedeem = safeParseDate(redeemPendingRaw);
+
+          if (!parsedRedeem) {
+            console.warn(
+              `Tanggal pending aneh (${redeemPendingRaw}) untuk msisdn=${msisdn}`,
+            );
+            // retry sekali lagi
+            try {
+              const retryResponse = await fetchWithRetry(url_check);
+              const $$ = cheerio.load(retryResponse.data);
+              const retryText = normalizeText(
+                $$(".other-title:contains('Dapat di redeem hingga')")
+                  .next(".other-value")
+                  .text(),
+              );
+              const retryParsed = safeParseDate(retryText);
+              redeemPending = retryParsed ? formatDate(retryParsed) : retryText;
+            } catch (e) {
+              redeemPending = redeemPendingRaw;
+            }
+          }
 
           let kuotaValue = 0;
           if (kuotaPending && !kuotaPending.includes("InternetMAX")) {
