@@ -69,6 +69,14 @@ export default class CheckService {
       Nov: 10,
       Dec: 11,
     };
+    function cleanBrokenDate(text) {
+      if (!text) return "";
+
+      // Ambil bagian pertama yang mirip tanggal
+      const m = text.match(/(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})/);
+      return m ? m[1] : text.trim();
+    }
+
     const dateRegex =
       /(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/;
     function safeParseDate(text) {
@@ -248,9 +256,14 @@ export default class CheckService {
 
           const kuotaPending = getPendingRow("Kuota");
           let redeemPendingRaw = getPendingRow("Dapat di redeem hingga");
-          let redeemPending = redeemPendingRaw;
+
+          // FIX untuk kasus 20281228
+          redeemPendingRaw = cleanBrokenDate(redeemPendingRaw);
 
           let parsedRedeem = safeParseDate(redeemPendingRaw);
+          let redeemPending = parsedRedeem
+            ? formatDate(parsedRedeem)
+            : redeemPendingRaw;
 
           if (!parsedRedeem) {
             console.warn(
