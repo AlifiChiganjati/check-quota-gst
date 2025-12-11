@@ -271,8 +271,7 @@ export default class CheckRepository {
       'Value',
       'Error: Data tidak ditemukan',
       'Error: SN and MSISDN Tidak ditemukan',
-      'Error: MSISDN Tidak ditemukan',
-      Error: Mohon Maaf, Terjadi kesalahan saat melakukan simcard checking!
+      'Error: MSISDN Tidak ditemukan'
   )
   AND l.date = CURDATE()
   AND c.console=?

@@ -269,6 +269,7 @@ export default class CheckService {
               redeemPending = retryParsed ? formatDate(retryParsed) : retryText;
             } catch (e) {
               redeemPending = redeemPendingRaw;
+              statusPaket = "Error: gagal recheck tanggal";
             }
           }
 
