@@ -257,19 +257,21 @@ export default class CheckService {
           const kuotaPending = getPendingRow("Kuota");
           let redeemPendingRaw = getPendingRow("Dapat di redeem hingga");
 
-          // FIX untuk kasus 20281228
           redeemPendingRaw = cleanBrokenDate(redeemPendingRaw);
 
           let parsedRedeem = safeParseDate(redeemPendingRaw);
           let redeemPending = parsedRedeem
             ? formatDate(parsedRedeem)
             : redeemPendingRaw;
+          // DETEKSI MODE VALUE (paket aktif)
+          const isValueMode = masaWaktu && masaWaktu.trim().length > 0;
 
-          if (!parsedRedeem) {
+          // PROSES PENDING HANYA JK TIDAK VALUE
+          if (!isValueMode && !parsedRedeem) {
             console.warn(
               `Tanggal pending aneh (${redeemPendingRaw}) untuk msisdn=${msisdn}`,
             );
-            // retry sekali lagi
+
             try {
               const retryResponse = await fetchWithRetry(url_check);
               const $$ = cheerio.load(retryResponse.data);
@@ -279,10 +281,13 @@ export default class CheckService {
                   .text(),
               );
               const retryParsed = safeParseDate(retryText);
+
               redeemPending = retryParsed ? formatDate(retryParsed) : retryText;
             } catch (e) {
               redeemPending = redeemPendingRaw;
-              statusPaket = "Error: gagal recheck tanggal";
+              if (!isValueMode) {
+                statusPaket = "Error: gagal recheck tanggal";
+              }
             }
           }
 
@@ -358,6 +363,7 @@ export default class CheckService {
               },
               statusPaket,
               value: {
+                msisdn: phoneNumber ? phoneNumber : msisdn,
                 masa_waktu: masaWaktu,
                 kuota_nasional: kuotaNasional,
                 kuota_local: kuotaLokal,
@@ -380,6 +386,7 @@ export default class CheckService {
               },
               statusPaket,
               value: {
+                msisdn: phoneNumber ? phoneNumber : msisdn,
                 kuota_pending: kuotaPending,
                 redeem_pending: redeemPending,
               },
