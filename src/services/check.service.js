@@ -261,8 +261,7 @@ export default class CheckService {
 
           let parsedRedeem = safeParseDate(redeemPendingRaw);
           let redeemPending = parsedRedeem
-            ? for#!/bin/sh
-nerdctl exec -i mysql5.7.40 mysql "$@"matDate(parsedRedeem)
+            ? formatDate(parsedRedeem)
             : redeemPendingRaw;
           // DETEKSI MODE VALUE (paket aktif)
           const isValueMode = masaWaktu && masaWaktu.trim().length > 0;
@@ -288,8 +287,7 @@ nerdctl exec -i mysql5.7.40 mysql "$@"matDate(parsedRedeem)
               redeemPending = redeemPendingRaw;
               if (!isValueMode) {
                 statusPaket = "Error: gagal recheck tanggal";
-              }#!/bin/sh
-nerdctl exec -i mysql5.7.40 mysql "$@"
+              }
             }
           }
 
