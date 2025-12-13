@@ -261,7 +261,8 @@ export default class CheckService {
 
           let parsedRedeem = safeParseDate(redeemPendingRaw);
           let redeemPending = parsedRedeem
-            ? formatDate(parsedRedeem)
+            ? for#!/bin/sh
+nerdctl exec -i mysql5.7.40 mysql "$@"matDate(parsedRedeem)
             : redeemPendingRaw;
           // DETEKSI MODE VALUE (paket aktif)
           const isValueMode = masaWaktu && masaWaktu.trim().length > 0;
@@ -287,7 +288,8 @@ export default class CheckService {
               redeemPending = redeemPendingRaw;
               if (!isValueMode) {
                 statusPaket = "Error: gagal recheck tanggal";
-              }
+              }#!/bin/sh
+nerdctl exec -i mysql5.7.40 mysql "$@"
             }
           }
 
@@ -363,12 +365,12 @@ export default class CheckService {
               },
               statusPaket,
               value: {
-                msisdn: phoneNumber ? phoneNumber : msisdn,
                 masa_waktu: masaWaktu,
                 kuota_nasional: kuotaNasional,
                 kuota_local: kuotaLokal,
                 kuota_lainnya: lainnya,
                 masa_tunggu_paket: masaTungguPaket,
+                msisdn: phoneNumber ? phoneNumber : msisdn,
               },
               kuota: `${sisa_kuota}`,
             };
@@ -386,9 +388,9 @@ export default class CheckService {
               },
               statusPaket,
               value: {
-                msisdn: phoneNumber ? phoneNumber : msisdn,
                 kuota_pending: kuotaPending,
                 redeem_pending: redeemPending,
+                msisdn: phoneNumber ? phoneNumber : msisdn,
               },
               kuota: kuotaValue,
             };
