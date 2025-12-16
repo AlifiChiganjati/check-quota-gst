@@ -1,16 +1,25 @@
-// service/check.service.js
 import CheckRepository from "../repository/check.repository.js";
 import * as cheerio from "cheerio";
 import { normalize } from "../utils/normalize.js";
 import pLimit from "p-limit";
 import { httpClient } from "../utils/httpClient.js";
 
+/* =========================
+ * CONSTANTS (NEW)
+ * ========================= */
+const VALID_YEAR_MIN = 2025;
+const VALID_YEAR_MAX = 2040;
+
+/* =========================
+ * RATE LIMITER (UNCHANGED)
+ * ========================= */
 class RateLimiter {
   constructor(permitsPerSecond = 30) {
     this.permitsPerSecond = permitsPerSecond;
     this.tokens = permitsPerSecond;
     this.lastRefill = Date.now();
   }
+
   _refill() {
     const now = Date.now();
     const elapsed = now - this.lastRefill;
@@ -20,6 +29,7 @@ class RateLimiter {
       this.lastRefill = now;
     }
   }
+
   async removeToken() {
     while (true) {
       this._refill();
@@ -32,394 +42,282 @@ class RateLimiter {
   }
 }
 
+/* =========================
+ * DATE HELPERS (FIXED)
+ * ========================= */
+const monthMap = {
+  Jan: 0,
+  Feb: 1,
+  Mar: 2,
+  Apr: 3,
+  May: 4,
+  Jun: 5,
+  Jul: 6,
+  Aug: 7,
+  Sep: 8,
+  Oct: 9,
+  Nov: 10,
+  Dec: 11,
+};
+
+const dateRegex =
+  /(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/;
+
+function parseDate(text) {
+  if (!text) return null;
+  const m = text.match(dateRegex);
+  if (!m) return null;
+
+  const [, d, mon, y, h = 0, mi = 0, s = 0] = m;
+  const month = monthMap[mon];
+  if (month === undefined) return null;
+
+  return new Date(+y, month, +d, +h, +mi, +s);
+}
+
+function isValidYear(date) {
+  if (!date) return false;
+  const y = date.getFullYear();
+  return y >= VALID_YEAR_MIN && y <= VALID_YEAR_MAX;
+}
+
+function formatDate(date) {
+  if (!date) return "";
+  const day = String(date.getDate()).padStart(2, "0");
+  const mon = Object.keys(monthMap).find(
+    (k) => monthMap[k] === date.getMonth(),
+  );
+  return `${day} ${mon} ${date.getFullYear()} ${String(
+    date.getHours(),
+  ).padStart(2, "0")}:${String(date.getMinutes()).padStart(
+    2,
+    "0",
+  )}:${String(date.getSeconds()).padStart(2, "0")}`;
+}
+
+function cleanBrokenDate(text) {
+  if (!text) return "";
+  const m = text.match(/(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})/);
+  return m ? m[1] : text.trim();
+}
+function extractMasaTungguPaket($) {
+  // 1️⃣ primary path
+  let text = getValueRow(
+    $(".info-item:has(.title:contains('Value'))").length
+      ? $(".info-item:has(.title:contains('Value'))")
+      : $("tbody"),
+    "Masa Tunggu Paket",
+  );
+
+  let parsed = parseDate(text);
+  if (parsed && isValidYear(parsed)) {
+    return { text, parsed };
+  }
+
+  // 2️⃣ fallback selector (same DOM)
+  const fallbackText = normalizeText(
+    $(".other-title:contains('Masa Tunggu Paket')").next(".other-value").text(),
+  );
+
+  const fallbackParsed = parseDate(fallbackText);
+  if (fallbackParsed && isValidYear(fallbackParsed)) {
+    return { text: fallbackText, parsed: fallbackParsed };
+  }
+
+  // 3️⃣ still invalid
+  return { text: fallbackText || text, parsed: null };
+}
+
+/* =========================
+ * DOM HELPERS
+ * ========================= */
+function normalizeText(txt) {
+  return (txt || "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getValueRow($container, title) {
+  let foundText = "";
+  $container.find("tr").each((_, el) => {
+    const titleTd = normalizeText(
+      cheerio.load(el)("td.other-title").text(),
+    ).toLowerCase();
+
+    if (titleTd.includes(title.toLowerCase())) {
+      foundText = normalizeText(cheerio.load(el)("td.other-value").text());
+      return false;
+    }
+  });
+  return foundText;
+}
+
+/* =========================
+ * FETCH (SINGLE SOURCE)
+ * ========================= */
+async function fetchHtml(url, rateLimiter) {
+  await rateLimiter.removeToken();
+  const res = await httpClient.get(url);
+  return res.data;
+}
+
+/* =========================
+ * PAGE PARSER (FIXED)
+ * ========================= */
+async function parsePage({ url, rateLimiter }) {
+  const html = await fetchHtml(url, rateLimiter);
+  const $ = cheerio.load(html);
+
+  const getExactValueByTitle = (title) => {
+    const item = $(".info-item").filter(
+      (_, el) =>
+        $(el).find(".title").text().trim().toLowerCase() ===
+        title.toLowerCase(),
+    );
+    return item.find(".single-value").text().trim() || null;
+  };
+
+  const serialNumber = getExactValueByTitle("Serial Number");
+  const phoneNumber = getExactValueByTitle("Number");
+
+  const masaTungguItem = $(".info-item").filter(
+    (_, el) => $(el).find(".title").text().trim() === "Masa Tunggu Kartu",
+  );
+
+  const masaTunggu = {
+    tanggal: masaTungguItem.find(".date").text().trim(),
+    status: masaTungguItem.find(".date-desc").text().trim(),
+  };
+
+  const pendingItem = $(".info-item").filter(
+    (_, el) => $(el).find(".title").text().trim() === "Pending Paket",
+  );
+
+  let valueItem = $(".info-item").filter(
+    (_, el) => $(el).find(".title").text().trim() === "Value",
+  );
+
+  if (valueItem.length === 0) valueItem = $("tbody");
+
+  const masaWaktu = getValueRow(valueItem, "Masa Waktu");
+  const kuotaNasional = getValueRow(valueItem, "Kuota Nasional");
+  const kuotaLokal = getValueRow(valueItem, "Kuota Lokal");
+  const lainnya = getValueRow(valueItem, "Lainnya");
+
+  let masaTungguPaket = "";
+  let statusPaket = "";
+
+  const { text, parsed } = extractMasaTungguPaket($);
+
+  if (masaWaktu && parsed) {
+    masaTungguPaket = formatDate(parsed);
+    statusPaket = "Value";
+  } else {
+    masaTungguPaket = text;
+    statusPaket = "Error";
+  }
+
+  return {
+    serialNumber,
+    phoneNumber,
+    masaTunggu,
+    masaWaktu,
+    kuotaNasional,
+    kuotaLokal,
+    lainnya,
+    masaTungguPaket,
+    statusPaket,
+    pendingItem,
+  };
+}
+
+/* =========================
+ * SERVICE
+ * ========================= */
 export default class CheckService {
   static async listUrls(consoleId, limit = 10) {
     return await CheckRepository.getAllUrl(consoleId, limit);
   }
-
   static async checkAllUrls(urls, opts = {}) {
-    const results = [];
     const concurrency = opts.concurrency ?? 50;
-    const limit = pLimit(concurrency);
     const rateLimiter = opts.rateLimiter ?? new RateLimiter(opts.rps ?? 30);
+    const limit = pLimit(concurrency);
 
-    const parseGB = (str) => {
-      if (!str) return 0;
-      const match = str.match(/(\d+)/);
-      return match ? parseInt(match[1], 10) : 0;
-    };
-
-    const normalizeText = (txt) =>
-      (txt || "")
-        .replace(/\u00A0/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-
-    const monthMap = {
-      Jan: 0,
-      Feb: 1,
-      Mar: 2,
-      Apr: 3,
-      May: 4,
-      Jun: 5,
-      Jul: 6,
-      Aug: 7,
-      Sep: 8,
-      Oct: 9,
-      Nov: 10,
-      Dec: 11,
-    };
-    function cleanBrokenDate(text) {
-      if (!text) return "";
-
-      // Ambil bagian pertama yang mirip tanggal
-      const m = text.match(/(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})/);
-      return m ? m[1] : text.trim();
-    }
-
-    const dateRegex =
-      /(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/;
-    function safeParseDate(text) {
-      if (!text) return null;
-      const match = text.match(dateRegex);
-      if (!match) return null;
-      const year = parseInt(match[3], 10);
-      if (year < 2020 || year > 2050) return null;
-      return parseDate(text);
-    }
-
-    function parseDate(text) {
-      if (!text) return null;
-      const match = text.match(dateRegex);
-      if (!match) return null;
-      const day = parseInt(match[1], 10);
-      const monthStr = match[2];
-      const year = parseInt(match[3], 10);
-      const hour = match[4] ? parseInt(match[4], 10) : 0;
-      const minute = match[5] ? parseInt(match[5], 10) : 0;
-      const second = match[6] ? parseInt(match[6], 10) : 0;
-      const month = monthMap[monthStr];
-      if (month === undefined) return null;
-      return new Date(year, month, day, hour, minute, second);
-    }
-    function formatDate(date) {
-      if (!date) return "";
-      const day = date.getDate().toString().padStart(2, "0");
-      const monthStr = Object.keys(monthMap).find(
-        (k) => monthMap[k] === date.getMonth(),
-      );
-      const year = date.getFullYear();
-      const hour = date.getHours().toString().padStart(2, "0");
-      const minute = date.getMinutes().toString().padStart(2, "0");
-      const second = date.getSeconds().toString().padStart(2, "0");
-      return `${day} ${monthStr} ${year} ${hour}:${minute}:${second}`;
-    }
-
-    const fetchWithRetry = async (url, retries = 3) => {
-      for (let i = 0; i < retries; i++) {
-        try {
-          await rateLimiter.removeToken();
-          return await httpClient.get(url);
-        } catch (err) {
-          if (i === retries - 1) throw err;
-          console.warn(`Retry ${i + 1} untuk ${url}...`);
-          await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
-        }
-      }
-    };
-
-    const tasks = urls.map(({ id, url_check, sn, msisdn }) =>
-      limit(async () => {
-        try {
-          const response = await fetchWithRetry(url_check);
-          const $ = cheerio.load(response.data);
-
-          const getExactValueByTitle = (title) => {
-            const item = $(".info-item").filter(
-              (_, el) =>
-                $(el).find(".title").text().trim().toLowerCase() ===
-                title.toLowerCase(),
-            );
-            return item.find(".single-value").text().trim() || null;
-          };
-
-          const serialNumber = getExactValueByTitle("Serial Number");
-          const phoneNumber = getExactValueByTitle("Number");
-
-          const masaTungguItem = $(".info-item").filter(
-            (_, el) =>
-              $(el).find(".title").text().trim() === "Masa Tunggu Kartu",
-          );
-          const tanggalMasaTunggu = masaTungguItem.find(".date").text().trim();
-          const statusMasaTunggu = masaTungguItem
-            .find(".date-desc")
-            .text()
-            .trim();
-
-          const pendingItem = $(".info-item").filter(
-            (_, el) => $(el).find(".title").text().trim() === "Pending Paket",
-          );
-
-          let valueItem = $(".info-item").filter(
-            (_, el) => $(el).find(".title").text().trim() === "Value",
-          );
-
-          if (valueItem.length === 0) {
-            valueItem = $("tbody");
-          }
-          const getValueRow = (rowTitle) => {
-            const rows = valueItem.find("tr");
-            let foundText = "";
-
-            rows.each((_, el) => {
-              const titleTd = $(el).find("td.other-title").text();
-              const title = normalizeText(titleTd).toLowerCase();
-              if (title.includes(rowTitle.toLowerCase())) {
-                foundText = normalizeText($(el).find("td.other-value").text());
-                return false;
-              }
+    return Promise.all(
+      urls.map(({ id, url_check, sn, msisdn }) =>
+        limit(async () => {
+          try {
+            const parsed = await parsePage({
+              url: url_check,
+              rateLimiter,
             });
 
-            return foundText || "";
-          };
+            const sisaKuota =
+              (parseInt(parsed.kuotaNasional) || 0) +
+              (parseInt(parsed.kuotaLokal) || 0) +
+              (parseInt(parsed.lainnya) || 0);
 
-          const getPendingRow = (rowTitle) => {
-            const rows = pendingItem.find("tr");
-            let foundText = "";
+            if (parsed.masaWaktu) {
+              return {
+                id,
+                sn,
+                msisdn,
+                url: url_check,
+                serialNumber: parsed.serialNumber,
+                phoneNumber: parsed.phoneNumber,
+                masaTunggu: parsed.masaTunggu,
+                statusPaket: parsed.statusPaket,
+                value: {
+                  masa_waktu: parsed.masaWaktu,
+                  kuota_nasional: parsed.kuotaNasional,
+                  kuota_local: parsed.kuotaLokal,
+                  kuota_lainnya: parsed.lainnya,
+                  masa_tunggu_paket: parsed.masaTungguPaket,
+                },
+                kuota: `${sisaKuota}`,
+              };
+            }
 
-            rows.each((_, el) => {
-              const titleTd = $(el).find("td.other-title").text();
-              const title = normalizeText(titleTd).toLowerCase();
-              if (title.includes(rowTitle.toLowerCase())) {
-                foundText = normalizeText($(el).find("td.other-value").text());
-                return false;
-              }
-            });
-
-            return foundText || "";
-          };
-          const masaWaktu = getValueRow("Masa Waktu");
-          const kuotaNasional = getValueRow("Kuota Nasional");
-          const kuotaLokal = getValueRow("Kuota Lokal");
-          const lainnya = getValueRow("Lainnya");
-
-          const rawMasaTungguPaketText = getValueRow("Masa Tunggu Paket");
-          let parsedDate = parseDate(rawMasaTungguPaketText);
-
-          let masaTungguPaket = "";
-          let statusPaket = "";
-
-          if (
-            masaWaktu &&
-            parsedDate &&
-            parsedDate.getFullYear() >= 2025 &&
-            parsedDate.getFullYear() <= 2040
-          ) {
-            masaTungguPaket = formatDate(parsedDate);
-            statusPaket = "Value";
-          } else {
-            console.warn(
-              `⚠️  Tanggal mencurigakan (${rawMasaTungguPaketText}) untuk msisdn=${msisdn}`,
+            const kuotaPending = getValueRow(parsed.pendingItem, "Kuota");
+            let redeemPending = cleanBrokenDate(
+              getValueRow(parsed.pendingItem, "Dapat di redeem hingga"),
             );
 
-            try {
-              const retryResponse = await fetchWithRetry(url_check);
-              const $$ = cheerio.load(retryResponse.data);
-
-              const retryText = normalizeText(
-                $$(".other-title:contains('Masa Tunggu Paket')")
-                  .next(".other-value")
-                  .text(),
-              );
-
-              const retryParsed = parseDate(retryText);
-
-              if (
-                retryParsed &&
-                retryParsed.getFullYear() >= 2025 &&
-                retryParsed.getFullYear() <= 2040
-              ) {
-                masaTungguPaket = formatDate(retryParsed);
-                statusPaket = "Value";
-                console.info(
-                  `✅ Tanggal berhasil diperbaiki untuk msisdn=${msisdn}`,
-                );
-              } else {
-                masaTungguPaket = retryText || rawMasaTungguPaketText;
-                statusPaket = `Error: tanggal tidak valid (setelah recheck)`;
-              }
-            } catch (e) {
-              masaTungguPaket = rawMasaTungguPaketText;
-              statusPaket = "Error: gagal recheck tanggal";
-            }
-          }
-
-          const kuotaPending = getPendingRow("Kuota");
-          let redeemPendingRaw = getPendingRow("Dapat di redeem hingga");
-
-          redeemPendingRaw = cleanBrokenDate(redeemPendingRaw);
-
-          let parsedRedeem = safeParseDate(redeemPendingRaw);
-          let redeemPending = parsedRedeem
-            ? formatDate(parsedRedeem)
-            : redeemPendingRaw;
-          // DETEKSI MODE VALUE (paket aktif)
-          const isValueMode = masaWaktu && masaWaktu.trim().length > 0;
-
-          // PROSES PENDING HANYA JK TIDAK VALUE
-          if (!isValueMode && !parsedRedeem) {
-            console.warn(
-              `Tanggal pending aneh (${redeemPendingRaw}) untuk msisdn=${msisdn}`,
-            );
-
-            try {
-              const retryResponse = await fetchWithRetry(url_check);
-              const $$ = cheerio.load(retryResponse.data);
-              const retryText = normalizeText(
-                $$(".other-title:contains('Dapat di redeem hingga')")
-                  .next(".other-value")
-                  .text(),
-              );
-              const retryParsed = safeParseDate(retryText);
-
-              redeemPending = retryParsed ? formatDate(retryParsed) : retryText;
-            } catch (e) {
-              redeemPending = redeemPendingRaw;
-              if (!isValueMode) {
-                statusPaket = "Error: gagal recheck tanggal";
-              }
-            }
-          }
-
-          let kuotaValue = 0;
-          if (kuotaPending && !kuotaPending.includes("InternetMAX")) {
-            const match = kuotaPending.match(/(\d+)\s*GB/i);
-            kuotaValue = match ? `${match[1]} GB` : "0";
-          }
-
-          const sisa_kuota =
-            parseGB(kuotaNasional) + parseGB(kuotaLokal) + parseGB(lainnya);
-
-          const hasInfoItem = $(".info-item").length > 0;
-          let errorMessage = null;
-          if (hasInfoItem) {
-            const hasMeaningfulValue =
-              (masaWaktu && masaWaktu.length > 0) ||
-              parseGB(kuotaNasional) > 0 ||
-              parseGB(kuotaLokal) > 0 ||
-              parseGB(lainnya) > 0 ||
-              (rawMasaTungguPaketText &&
-                (dateRegex.test(rawMasaTungguPaketText) ||
-                  rawMasaTungguPaketText.trim().length > 0));
-
-            if (hasMeaningfulValue) {
-              statusPaket = "Value";
-            } else if (
-              (kuotaPending && kuotaPending.length > 0) ||
-              (redeemPending && redeemPending.length > 0)
-            ) {
-              statusPaket = "Pending Paket";
-            } else {
-              errorMessage = $("p").first().text().trim() || null;
-              statusPaket = errorMessage
-                ? `Error: ${errorMessage}`
-                : "Error: Data tidak ditemukan";
+            const redeemParsed = parseDate(redeemPending);
+            if (isValidYear(redeemParsed)) {
+              redeemPending = formatDate(redeemParsed);
             }
 
-            if (hasInfoItem && hasMeaningfulValue) {
-              errorMessage = null;
-            }
-
-            const tanggalMasaTungguTrim = tanggalMasaTunggu?.trim() || null;
-            const statusMasaTungguTrim = statusMasaTunggu?.trim() || null;
-            if (
-              !tanggalMasaTungguTrim &&
-              !statusMasaTungguTrim &&
-              !hasMeaningfulValue
-            ) {
-              errorMessage = $("p").first().text().trim() || null;
-              statusPaket = errorMessage
-                ? `Error: ${errorMessage}`
-                : "Error: Data tidak ditemukan";
-            }
-          } else {
-            errorMessage = $("p").first().text().trim() || null;
-            statusPaket = errorMessage
-              ? `Error: ${errorMessage}`
-              : "Error: Data tidak ditemukan";
-          }
-
-          if (masaWaktu) {
             return {
               id,
               sn,
               msisdn,
               url: url_check,
-              serialNumber,
-              phoneNumber,
-              masaTunggu: {
-                tanggal: tanggalMasaTunggu,
-                status: statusMasaTunggu,
-              },
-              statusPaket,
-              value: {
-                masa_waktu: masaWaktu,
-                kuota_nasional: kuotaNasional,
-                kuota_local: kuotaLokal,
-                kuota_lainnya: lainnya,
-                masa_tunggu_paket: masaTungguPaket,
-                // msisdn: phoneNumber ? phoneNumber : msisdn,
-              },
-              kuota: `${sisa_kuota}`,
-            };
-          } else {
-            return {
-              id,
-              sn,
-              msisdn,
-              url: url_check,
-              serialNumber,
-              phoneNumber,
-              masaTunggu: {
-                tanggal: tanggalMasaTunggu,
-                status: statusMasaTunggu,
-              },
-              statusPaket,
+              serialNumber: parsed.serialNumber,
+              phoneNumber: parsed.phoneNumber,
+              masaTunggu: parsed.masaTunggu,
+              statusPaket: parsed.statusPaket,
               value: {
                 kuota_pending: kuotaPending,
                 redeem_pending: redeemPending,
-                // msisdn: phoneNumber ? phoneNumber : msisdn,
               },
-              kuota: kuotaValue,
+              kuota: "0",
+            };
+          } catch (err) {
+            return {
+              id,
+              sn,
+              msisdn,
+              url: url_check,
+              statusPaket: "Error",
+              value: { message: err.message },
+              kuota: "0",
             };
           }
-        } catch (err) {
-          return {
-            id,
-            sn,
-            msisdn,
-            url: url_check,
-            serialNumber: null,
-            phoneNumber: null,
-            masaTunggu: {
-              tanggal: null,
-              status: "Gagal akses URL",
-            },
-            statusPaket: "Error",
-            value: {
-              message: err.message || "Gagal ambil data",
-              statusCode: err.response?.status || null,
-            },
-            kuota: "0",
-          };
-        }
-      }),
+        }),
+      ),
     );
-
-    const settled = await Promise.all(tasks);
-    results.push(...settled);
-
-    return results;
   }
 
   // ----------------------------
