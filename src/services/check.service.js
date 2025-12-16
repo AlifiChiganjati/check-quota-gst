@@ -212,8 +212,8 @@ export default class CheckService {
           if (
             masaWaktu &&
             parsedDate &&
-            parsedDate.getFullYear() >= 2020 &&
-            parsedDate.getFullYear() <= 2050
+            parsedDate.getFullYear() >= 2025 &&
+            parsedDate.getFullYear() <= 2040
           ) {
             masaTungguPaket = formatDate(parsedDate);
             statusPaket = "Value";
@@ -236,8 +236,8 @@ export default class CheckService {
 
               if (
                 retryParsed &&
-                retryParsed.getFullYear() >= 2020 &&
-                retryParsed.getFullYear() <= 2050
+                retryParsed.getFullYear() >= 2025 &&
+                retryParsed.getFullYear() <= 2040
               ) {
                 masaTungguPaket = formatDate(retryParsed);
                 statusPaket = "Value";
@@ -368,7 +368,7 @@ export default class CheckService {
                 kuota_local: kuotaLokal,
                 kuota_lainnya: lainnya,
                 masa_tunggu_paket: masaTungguPaket,
-                msisdn: phoneNumber ? phoneNumber : msisdn,
+                // msisdn: phoneNumber ? phoneNumber : msisdn,
               },
               kuota: `${sisa_kuota}`,
             };
@@ -388,7 +388,7 @@ export default class CheckService {
               value: {
                 kuota_pending: kuotaPending,
                 redeem_pending: redeemPending,
-                msisdn: phoneNumber ? phoneNumber : msisdn,
+                // msisdn: phoneNumber ? phoneNumber : msisdn,
               },
               kuota: kuotaValue,
             };
