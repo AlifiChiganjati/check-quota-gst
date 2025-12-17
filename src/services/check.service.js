@@ -244,6 +244,12 @@ export default class CheckService {
     const rateLimiter = opts.rateLimiter ?? new RateLimiter(opts.rps ?? 30);
     const limit = pLimit(concurrency);
 
+    const parseGB = (val) => {
+      if (!val) return 0;
+      const m = String(val).match(/(\d+(\.\d+)?)/);
+      return m ? Number(m[1]) : 0;
+    };
+
     return Promise.all(
       urls.map(({ id, url_check, sn, msisdn }) =>
         limit(async () => {
@@ -253,12 +259,29 @@ export default class CheckService {
               rateLimiter,
             });
 
+            // ===============================
+            // HITUNG KUOTA
+            // ===============================
             const sisaKuota =
-              (parseInt(parsed.kuotaNasional) || 0) +
-              (parseInt(parsed.kuotaLokal) || 0) +
-              (parseInt(parsed.lainnya) || 0);
+              parseGB(parsed.kuotaNasional) +
+              parseGB(parsed.kuotaLokal) +
+              parseGB(parsed.lainnya);
 
-            if (parsed.masaWaktu) {
+            // ===============================
+            // HAS MEANINGFUL VALUE (CORE)
+            // ===============================
+            const hasMeaningfulValue =
+              (parsed.masaWaktu && parsed.masaWaktu.trim().length > 0) ||
+              parseGB(parsed.kuotaNasional) > 0 ||
+              parseGB(parsed.kuotaLokal) > 0 ||
+              parseGB(parsed.lainnya) > 0 ||
+              (parsed.masaTungguPaket &&
+                parsed.masaTungguPaket.trim().length > 0);
+
+            // ===============================
+            // VALUE MODE (PAKET AKTIF)
+            // ===============================
+            if (hasMeaningfulValue) {
               return {
                 id,
                 sn,
@@ -267,7 +290,7 @@ export default class CheckService {
                 serialNumber: parsed.serialNumber,
                 phoneNumber: parsed.phoneNumber,
                 masaTunggu: parsed.masaTunggu,
-                statusPaket: parsed.statusPaket,
+                statusPaket: "Value",
                 value: {
                   masa_waktu: parsed.masaWaktu,
                   kuota_nasional: parsed.kuotaNasional,
@@ -279,6 +302,9 @@ export default class CheckService {
               };
             }
 
+            // ===============================
+            // PENDING MODE
+            // ===============================
             const kuotaPending = getValueRow(parsed.pendingItem, "Kuota");
             let redeemPending = cleanBrokenDate(
               getValueRow(parsed.pendingItem, "Dapat di redeem hingga"),
@@ -289,6 +315,30 @@ export default class CheckService {
               redeemPending = formatDate(redeemParsed);
             }
 
+            if (
+              (kuotaPending && kuotaPending.trim().length > 0) ||
+              (redeemPending && redeemPending.trim().length > 0)
+            ) {
+              return {
+                id,
+                sn,
+                msisdn,
+                url: url_check,
+                serialNumber: parsed.serialNumber,
+                phoneNumber: parsed.phoneNumber,
+                masaTunggu: parsed.masaTunggu,
+                statusPaket: "Pending Paket",
+                value: {
+                  kuota_pending: kuotaPending,
+                  redeem_pending: redeemPending,
+                },
+                kuota: "0",
+              };
+            }
+
+            // ===============================
+            // ERROR TERAKHIR (AMBIL <p>)
+            // ===============================
             return {
               id,
               sn,
@@ -297,14 +347,14 @@ export default class CheckService {
               serialNumber: parsed.serialNumber,
               phoneNumber: parsed.phoneNumber,
               masaTunggu: parsed.masaTunggu,
-              statusPaket: parsed.statusPaket,
+              statusPaket: parsed.statusPaket || "Error: Data tidak ditemukan",
               value: {
-                kuota_pending: kuotaPending,
-                redeem_pending: redeemPending,
+                message: parsed.statusPaket || "Data tidak ditemukan",
               },
               kuota: "0",
             };
           } catch (err) {
+            // ❗ ERROR TEKNIS SAJA
             return {
               id,
               sn,
