@@ -324,129 +324,73 @@ export default class CheckService {
   // insertDB: optimized batch path
   // ----------------------------
   static async insertDB(results, opts = {}) {
-    console.log("start insert log (batch-optimized)");
+    console.log("start insert log (append-only, per-run guarded)");
 
     const BATCH_SIZE = opts.batchSize ?? 1000;
-    const parallelProcess = opts.parallelProcess ?? 50;
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-    const safe = (val, fallback = null) => (val === undefined ? fallback : val);
-
-    function shouldFail(data) {
-      const statusPaket = (data.statusPaket || "").toLowerCase();
-
-      if (statusPaket.startsWith("error")) {
-        return true;
-      }
-      if (statusPaket.includes("pending paket")) {
-        return false;
-      }
-      if (statusPaket === "value") {
-        return false;
-      }
-      return false;
-    }
-
-    // prepare normalized minimal payloads (lightweight)
-    const normalized = results.map((data) => {
-      const sn = safe(normalize(data.serialNumber, data.sn), null);
-      const msisdn = safe(normalize(data.phoneNumber, data.msisdn), null);
-      const masaTungguTanggal = safe(
-        normalize(data.masaTunggu?.tanggal, null),
-        null,
-      );
-      const status = safe(normalize(data.masaTunggu?.status, null), null);
-      const statusPaket = safe(normalize(data.statusPaket, null), null);
-      const kuota = safe(normalize(data.kuota, "0"), "0");
-      const check_quota_id = safe(data.id, null);
-
-      const value_check =
-        data.value && Object.keys(data.value).length > 0
-          ? data.value
-          : { message: "coba periksa url", sn, msisdn };
-
-      return {
-        id: data.id,
-        sn,
-        msisdn,
-        masa_tunggu_kartu: masaTungguTanggal,
-        status,
-        status_paket: statusPaket,
-        kuota,
-        check_quota_id,
-        value_check,
-        date: today,
-        date_check: new Date(),
-        // will fill ref later
-        ref: 1,
-        isFailed: shouldFail(data),
-      };
-    });
-
-    // 1) batch prefetch: find which (check_quota_id, date) already exist
-    const checkQuotaIds = [
-      ...new Set(
-        normalized.map((r) => r.check_quota_id).filter((x) => x != null),
-      ),
-    ];
+    const safe = (v, f = null) => (v === undefined || v === "" ? f : v);
 
     // ----------------------------
-    const todayMeta = await CheckRepository.getTodayMeta(checkQuotaIds, today);
+    // 1️⃣ NORMALIZE DATA
+    // ----------------------------
+    const normalized = results.map((data) => ({
+      sn: safe(normalize(data.serialNumber, data.sn)),
+      msisdn: safe(normalize(data.phoneNumber, data.msisdn)),
+      masa_tunggu_kartu: safe(normalize(data.masaTunggu?.tanggal)),
+      status: safe(normalize(data.masaTunggu?.status)),
+      status_paket: safe(normalize(data.statusPaket)),
+      kuota: safe(normalize(data.kuota), "0"),
+      check_quota_id: data.id,
+      value_check:
+        data.value && Object.keys(data.value).length > 0
+          ? data.value
+          : { message: "coba periksa url" },
+      date: today,
+      date_check: new Date(),
+    }));
+
+    // ----------------------------
+    // 2️⃣ PREFETCH LAST REF HARI INI
+    // ----------------------------
+    const ids = [...new Set(normalized.map((r) => r.check_quota_id))];
 
     /*
-    todayMeta = [
-      { check_quota_id, lastRef, gst_status }
-    ]
+    todayMeta:
+    { check_quota_id, lastRef }
   */
+    const todayMeta = await CheckRepository.getTodayMeta(ids, today);
 
     const metaMap = {};
     for (const r of todayMeta) {
       metaMap[String(r.check_quota_id)] = {
-        exists: true,
         lastRef: r.lastRef || 0,
-        lastStatusPaket: (r.lastStatusPaket || "").toLowerCase(),
       };
     }
 
     // ----------------------------
-    // 3️⃣ DECISION ENGINE
+    // 3️⃣ DECISION ENGINE (SANGAT SIMPLE)
     // ----------------------------
     const buffer = [];
+    const insertedThisRun = new Set(); // ⛔ GUARD SATU-SATUNYA
 
     for (const item of normalized) {
       const id = String(item.check_quota_id);
+
+      // ⛔ 1 ID hanya boleh insert 1x per run
+      if (insertedThisRun.has(id)) continue;
+
       const meta = metaMap[id];
 
-      // 1️⃣ BELUM ADA LOG HARI INI
-      if (!meta) {
-        buffer.push({
-          ...item,
-          ref: 1,
-        });
+      const ref = meta ? meta.lastRef + 1 : 1;
 
-        metaMap[id] = {
-          exists: true,
-          lastRef: 1,
-          lastStatusPaket: item.status_paket.toLowerCase(),
-        };
-        continue;
-      }
+      buffer.push({
+        ...item,
+        ref,
+      });
 
-      // 2️⃣ ADA LOG & TERAKHIR ERROR → BOLEH RETRY
-      if (meta.lastStatusPaket.startsWith("error")) {
-        buffer.push({
-          ...item,
-          ref: meta.lastRef + 1,
-        });
-
-        meta.lastRef += 1;
-        meta.lastStatusPaket = item.status_paket.toLowerCase();
-        continue;
-      }
-
-      // 3️⃣ SUDAH VALUE / PENDING → SKIP
-      continue;
+      insertedThisRun.add(id);
     }
 
     if (buffer.length === 0) {
@@ -460,30 +404,26 @@ export default class CheckService {
     for (let i = 0; i < buffer.length; i += BATCH_SIZE) {
       const chunk = buffer.slice(i, i + BATCH_SIZE);
 
-      try {
-        await CheckRepository.insertBulk(
-          chunk.map((r) => ({
-            sn: r.sn,
-            msisdn: r.msisdn,
-            masa_tunggu_kartu: r.masa_tunggu_kartu,
-            value_check: r.value_check,
-            date_check: r.date_check,
-            status: r.status,
-            status_paket: r.status_paket,
-            kuota: r.kuota,
-            check_quota_id: r.check_quota_id,
-            date: r.date,
-            ref: r.ref,
-          })),
-        );
-      } catch (err) {
-        console.error("Bulk insert gagal:", err.message);
-        throw err;
-      }
+      await CheckRepository.insertBulk(
+        chunk.map((r) => ({
+          sn: r.sn,
+          msisdn: r.msisdn,
+          masa_tunggu_kartu: r.masa_tunggu_kartu,
+          value_check: r.value_check,
+          date_check: r.date_check,
+          status: r.status,
+          status_paket: r.status_paket,
+          kuota: r.kuota,
+          check_quota_id: r.check_quota_id,
+          date: r.date,
+          ref: r.ref,
+        })),
+      );
     }
 
     console.log(`Insert selesai ✅ (${buffer.length} row)`);
   }
+
   // keep other methods as-is (updateStatus, resetStatusGst, listResetGst, resetStatusGstStuck)
   static async updateStatus() {
     try {
