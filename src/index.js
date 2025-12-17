@@ -42,7 +42,7 @@ function startCLI() {
 
     if (isNaN(choice) || choice < 0 || choice > 21) {
       console.log(
-        "⚠️ Pilihan tidak valid! Masukkan angka antara 0–19 ya~ (/'3')/",
+        "⚠️ Pilihan tidak valid! Masukkan angka antara 0–21 ya~ (/'3')/",
       );
       rl.close();
       return;

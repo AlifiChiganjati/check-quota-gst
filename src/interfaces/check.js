@@ -72,7 +72,7 @@ const check = async (consoleId) => {
     } catch (err) {
       console.error("❌ Error saat step check/insert:", err);
       console.error("Stack trace:", err?.stack);
-      await delay(10000);
+      await delay(5000);
     }
 
     if (cycle === MAX_CYCLE) {
