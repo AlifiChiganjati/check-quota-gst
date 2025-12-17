@@ -309,14 +309,16 @@ export default class CheckRepository {
   static async getTodayMeta(checkQuotaIds, today) {
     const sql = `
     SELECT 
-      l.check_quota_id,
-      MAX(l.ref) AS lastRef,
-      q.status AS gst_status
-    FROM gst_log_check_quota l
-    JOIN gst_check_quota q ON q.id = l.check_quota_id
-    WHERE l.check_quota_id IN (?)
-      AND l.date = ?
-    GROUP BY l.check_quota_id, q.status
+  l.check_quota_id,
+  MAX(l.ref) AS lastRef,
+  SUBSTRING_INDEX(
+    GROUP_CONCAT(l.status_paket ORDER BY l.ref DESC),
+    ',', 1
+  ) AS lastStatusPaket
+FROM gst_log_check_quota l
+WHERE l.check_quota_id IN (?)
+  AND l.date = ?
+GROUP BY l.check_quota_id;
   `;
     const [rows] = await db.query(sql, [checkQuotaIds, today]);
     return rows;

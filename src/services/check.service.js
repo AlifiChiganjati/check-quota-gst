@@ -405,7 +405,7 @@ export default class CheckService {
       metaMap[String(r.check_quota_id)] = {
         exists: true,
         lastRef: r.lastRef || 0,
-        gstStatus: r.gst_status,
+        lastStatusPaket: (r.lastStatusPaket || "").toLowerCase(),
       };
     }
 
@@ -418,34 +418,34 @@ export default class CheckService {
       const id = String(item.check_quota_id);
       const meta = metaMap[id];
 
-      // CASE 1: BELUM ADA LOG HARI INI
+      // 1️⃣ BELUM ADA LOG HARI INI
       if (!meta) {
         buffer.push({
           ...item,
           ref: 1,
         });
 
-        // lock supaya run ini tidak insert ulang
         metaMap[id] = {
           exists: true,
           lastRef: 1,
-          gstStatus: item.status_paket,
+          lastStatusPaket: item.status_paket.toLowerCase(),
         };
         continue;
       }
 
-      // CASE 2: ADA LOG & GST STATUS = 0 → RETRY
-      if (meta.gstStatus === 0) {
+      // 2️⃣ ADA LOG & TERAKHIR ERROR → BOLEH RETRY
+      if (meta.lastStatusPaket.startsWith("error")) {
         buffer.push({
           ...item,
           ref: meta.lastRef + 1,
         });
 
         meta.lastRef += 1;
+        meta.lastStatusPaket = item.status_paket.toLowerCase();
         continue;
       }
 
-      // CASE 3: SUDAH ADA & STATUS ≠ 0 → SKIP
+      // 3️⃣ SUDAH VALUE / PENDING → SKIP
       continue;
     }
 
