@@ -17,7 +17,7 @@ const processCheckBatch = async (consoleId) => {
   console.log("Ambil URL dari DB...");
   const urls = await CheckService.listUrls(consoleId);
 
-  if (urls.length === 0) {
+  if (!urls.length) {
     console.log("✅ Semua data hari ini sudah di-log, proses selesai");
     await CheckService.resetStatusGstStuck(consoleId);
     return false;

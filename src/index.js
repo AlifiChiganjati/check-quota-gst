@@ -37,7 +37,7 @@ function startCLI() {
 
   showMenu();
 
-  rl.question("Masukkan pilihan (0–18): ", async (answer) => {
+  rl.question("Masukkan pilihan (0–21): ", async (answer) => {
     const choice = parseInt(answer.trim(), 10);
 
     if (isNaN(choice) || choice < 0 || choice > 21) {

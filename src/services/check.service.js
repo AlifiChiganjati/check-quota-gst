@@ -391,153 +391,99 @@ export default class CheckService {
       ),
     ];
 
-    // map of check_quota_id -> boolean (exists today)
-    let existingMap = {};
-    if (checkQuotaIds.length > 0) {
-      try {
-        const existingRows = await CheckRepository.getExistingLogs(
-          checkQuotaIds,
-          today,
-        );
-        // existingRows: array of { check_quota_id, date, count }
-        existingMap = existingRows.reduce((acc, row) => {
-          acc[String(row.check_quota_id)] = true;
-          return acc;
-        }, {});
-      } catch (err) {
-        console.error("Error prefetch existing logs:", err.message);
-        existingMap = {};
-      }
+    // ----------------------------
+    const todayMeta = await CheckRepository.getTodayMeta(checkQuotaIds, today);
+
+    /*
+    todayMeta = [
+      { check_quota_id, lastRef, gst_status }
+    ]
+  */
+
+    const metaMap = {};
+    for (const r of todayMeta) {
+      metaMap[String(r.check_quota_id)] = {
+        exists: true,
+        lastRef: r.lastRef || 0,
+        gstStatus: r.gst_status,
+      };
     }
 
-    // 2) batch prefetch lastRef per check_quota_id
-    let lastRefMap = {};
-    if (checkQuotaIds.length > 0) {
-      try {
-        const lastRefs = await CheckRepository.getLastRefs(
-          checkQuotaIds,
-          today,
-        );
-        // lastRefs: array of { check_quota_id, lastRef }
-        lastRefMap = lastRefs.reduce((acc, row) => {
-          acc[String(row.check_quota_id)] = row.lastRef || 0;
-          return acc;
-        }, {});
-      } catch (err) {
-        console.error("Error prefetch lastRef:", err.message);
-        lastRefMap = {};
-      }
-    }
+    // ----------------------------
+    // 3️⃣ DECISION ENGINE
+    // ----------------------------
+    const buffer = [];
 
-    // 3) assign refs in-memory — preserve ordering per check_quota_id
-    const perIdCounter = {}; // map id -> counter for current run
     for (const item of normalized) {
       const id = String(item.check_quota_id);
-      const base = parseInt(lastRefMap[id] || 0, 10);
-      if (!perIdCounter[id]) perIdCounter[id] = 0;
-      perIdCounter[id] += 1;
-      // if already exists in db, we still insert as new ref = base + counter
-      item.ref = base + perIdCounter[id];
+      const meta = metaMap[id];
+
+      // CASE 1: BELUM ADA LOG HARI INI
+      if (!meta) {
+        buffer.push({
+          ...item,
+          ref: 1,
+        });
+
+        // lock supaya run ini tidak insert ulang
+        metaMap[id] = {
+          exists: true,
+          lastRef: 1,
+          gstStatus: item.status_paket,
+        };
+        continue;
+      }
+
+      // CASE 2: ADA LOG & GST STATUS = 0 → RETRY
+      if (meta.gstStatus === 0) {
+        buffer.push({
+          ...item,
+          ref: meta.lastRef + 1,
+        });
+
+        meta.lastRef += 1;
+        continue;
+      }
+
+      // CASE 3: SUDAH ADA & STATUS ≠ 0 → SKIP
+      continue;
     }
 
-    // 4) Build batches and insert in bulk (with retry strategy)
-    const buffer = [];
-    const bulkInsertChunk = async (rowsChunk) => {
-      if (!rowsChunk || rowsChunk.length === 0) return;
+    if (buffer.length === 0) {
+      console.log("Tidak ada data yang perlu diinsert");
+      return;
+    }
+
+    // ----------------------------
+    // 4️⃣ BULK INSERT
+    // ----------------------------
+    for (let i = 0; i < buffer.length; i += BATCH_SIZE) {
+      const chunk = buffer.slice(i, i + BATCH_SIZE);
+
       try {
-        await CheckRepository.insertBulk(rowsChunk);
+        await CheckRepository.insertBulk(
+          chunk.map((r) => ({
+            sn: r.sn,
+            msisdn: r.msisdn,
+            masa_tunggu_kartu: r.masa_tunggu_kartu,
+            value_check: r.value_check,
+            date_check: r.date_check,
+            status: r.status,
+            status_paket: r.status_paket,
+            kuota: r.kuota,
+            check_quota_id: r.check_quota_id,
+            date: r.date,
+            ref: r.ref,
+          })),
+        );
       } catch (err) {
-        console.error("Bulk insert failed:", err.message);
-        // fallback: per-row insert with retry
-        for (const row of rowsChunk) {
-          let tries = 0;
-          const maxTries = 3;
-          while (tries < maxTries) {
-            tries++;
-            try {
-              await CheckRepository.insert(row);
-              break;
-            } catch (e) {
-              console.error(
-                `Fallback insert failed (try=${tries}) for sn=${row.sn}:`,
-                e.message,
-              );
-              if (tries >= maxTries) {
-                console.error("Giving up for row:", row);
-              } else {
-                await new Promise((r) => setTimeout(r, 500 * tries));
-              }
-            }
-          }
-        }
-      }
-    };
-
-    // 5) prepare status update pairs for bulk status update (id -> newStatus)
-    // determine new status per check_quota row: isFailed => 2 else 4, but if pending paket then keep 1? original logic: pending paket => false (not failed) => newStatus=4
-    const statusPairs = []; // { id, newStatus }
-    for (const item of normalized) {
-      const newStatus = item.isFailed ? 2 : 4;
-      statusPairs.push({ id: item.id, newStatus });
-    }
-
-    // 6) Streaming insertion: flush when buffer reaches BATCH_SIZE
-    for (const item of normalized) {
-      const toInsert = {
-        sn: item.sn,
-        msisdn: item.msisdn,
-        masa_tunggu_kartu: item.masa_tunggu_kartu,
-        value_check: item.value_check,
-        date_check: item.date_check,
-        status: item.status,
-        status_paket: item.status_paket,
-        kuota: item.kuota,
-        check_quota_id: item.check_quota_id,
-        date: item.date,
-        ref: item.ref,
-      };
-      buffer.push(toInsert);
-      if (buffer.length >= BATCH_SIZE) {
-        const chunk = buffer.splice(0, BATCH_SIZE);
-        await bulkInsertChunk(chunk);
+        console.error("Bulk insert gagal:", err.message);
+        throw err;
       }
     }
 
-    // flush remaining
-    if (buffer.length > 0) {
-      await bulkInsertChunk(buffer.splice(0, buffer.length));
-    }
-
-    // 7) bulk update statuses using single query (CASE WHEN)
-    try {
-      // compress statusPairs by id (last wins)
-      const mapPairs = {};
-      for (const p of statusPairs) mapPairs[p.id] = p.newStatus;
-      const pairs = Object.entries(mapPairs).map(([id, newStatus]) => ({
-        id: Number(id),
-        newStatus,
-      }));
-      if (pairs.length > 0) {
-        await CheckRepository.bulkUpdateStatuses(pairs);
-      }
-    } catch (err) {
-      console.error("Bulk status update failed:", err.message);
-      // fallback: per-row update
-      for (const p of statusPairs) {
-        try {
-          await CheckRepository.updateStatus(p.id, p.newStatus);
-        } catch (e) {
-          console.error(
-            `Fallback status update failed for id=${p.id}:`,
-            e.message,
-          );
-        }
-      }
-    }
-
-    console.log("Insert batch selesai ✅");
+    console.log(`Insert selesai ✅ (${buffer.length} row)`);
   }
-
   // keep other methods as-is (updateStatus, resetStatusGst, listResetGst, resetStatusGstStuck)
   static async updateStatus() {
     try {
