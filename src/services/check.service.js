@@ -320,31 +320,50 @@ export default class CheckService {
       urls.map(({ id, url_check, sn, msisdn }) =>
         limit(async () => {
           try {
-            const parsed = await parsePage({
-              url: url_check,
-              rateLimiter,
-            });
+            const parsed = await parsePage({ url: url_check, rateLimiter });
 
-            // ===============================
-            // HITUNG KUOTA
-            // ===============================
+            // 1. PRIORITAS PALING TINGGI: Validasi Halaman & Data Identitas
+            // Kalau ini kena, langsung stop, jangan cek kuota atau pending lagi!
+            if (
+              !parsed.serialNumber ||
+              !parsed.phoneNumber ||
+              parsed.pageError
+            ) {
+              const errorMsg =
+                parsed.pageError || "SN and MSISDN Tidak ditemukan";
+              return {
+                kind: "FAILED",
+                id,
+                sn,
+                msisdn,
+                url: url_check,
+                serialNumber: parsed.serialNumber ?? null,
+                phoneNumber: parsed.phoneNumber ?? null,
+                masaTunggu: parsed.masaTunggu,
+                statusPaket: `Error: ${errorMsg}`,
+                value: { message: errorMsg },
+                kuota: "0",
+              };
+            }
+
+            // 2. HITUNG KUOTA (Hanya dilakukan jika data identitas valid)
             const sisaKuota =
               parseGB(parsed.kuotaNasional) +
               parseGB(parsed.kuotaLokal) +
               parseGB(parsed.lainnya);
 
-            // ===============================
-            // PENDING MODE
-            // ===============================
+            // 3. PRIORITAS KEDUA: PENDING MODE (Tapi harus valid isinya!)
             const kuotaPending = parsed.pending?.kuota;
-            let redeemPending = parsed.pending?.redeem;
+            let redeemPendingRaw = parsed.pending?.redeem;
+            const redeemParsed = parseDate(redeemPendingRaw);
 
-            const redeemParsed = parseDate(redeemPending);
-            if (isValidYear(redeemParsed)) {
-              redeemPending = formatDate(redeemParsed);
-            }
-            if (parsed.pending && parsed.pending.kuota) {
+            // Kita hanya masuk "Pending Paket" kalau kuotanya ada DAN tanggalnya masuk akal
+            if (
+              isValidTextValue(kuotaPending) &&
+              validateParsedDate(redeemParsed, redeemPendingRaw)
+            ) {
               return {
+                kind: "SUCCESS",
                 id,
                 sn,
                 msisdn,
@@ -354,28 +373,22 @@ export default class CheckService {
                 masaTunggu: parsed.masaTunggu,
                 statusPaket: "Pending Paket",
                 value: {
-                  kuota_pending: kuotaPending || null,
-                  redeem_pending: redeemPending || null,
+                  kuota_pending: kuotaPending,
+                  redeem_pending: formatDate(redeemParsed),
                 },
                 kuota: "0",
               };
             }
 
-            // ===============================
-            // HAS MEANINGFUL VALUE (CORE)
-            // ===============================
+            // 4. PRIORITAS KETIGA: VALUE MODE (PAKET AKTIF)
             const hasMeaningfulValue =
               (parsed.masaWaktu && isValidTextValue(parsed.masaWaktu)) ||
-              parseGB(parsed.kuotaNasional) > 0 ||
-              parseGB(parsed.kuotaLokal) > 0 ||
-              parseGB(parsed.lainnya) > 0 ||
+              sisaKuota > 0 ||
               parsed.masaTungguPaketValid === true;
 
-            // ===============================
-            // VALUE MODE (PAKET AKTIF)
-            // ===============================
             if (hasMeaningfulValue) {
               return {
+                kind: "SUCCESS",
                 id,
                 sn,
                 msisdn,
@@ -395,31 +408,10 @@ export default class CheckService {
               };
             }
 
-            // HARD GUARD: SN & MSISDN wajib ada
-            if (!parsed.serialNumber || !parsed.phoneNumber) {
-              const errorMsg =
-                parsed.pageError || "SN and MSISDN Tidak ditemukan";
-
-              return {
-                id,
-                sn,
-                msisdn,
-                url: url_check,
-                serialNumber: parsed.serialNumber ?? null,
-                phoneNumber: parsed.phoneNumber ?? null,
-                masaTunggu: parsed.masaTunggu,
-                statusPaket: `Error: ${errorMsg}`,
-                value: {
-                  message: errorMsg,
-                },
-                kuota: "0",
-              };
-            }
-
-            // ===============================
-            // ERROR TERAKHIR (AMBIL <p>)
-            // ===============================
+            // 5. FALLBACK TERAKHIR: Kalau semua di atas gagal
+            // Berarti halaman kebuka, SN ada, tapi nggak ada paket aktif maupun pending yang valid
             return {
+              kind: "FAILED",
               id,
               sn,
               msisdn,
@@ -427,20 +419,22 @@ export default class CheckService {
               serialNumber: parsed.serialNumber,
               phoneNumber: parsed.phoneNumber,
               masaTunggu: parsed.masaTunggu,
-              statusPaket: parsed.statusPaket || "Error: Data tidak ditemukan",
+              statusPaket: parsed.statusPaket || "Error: Paket tidak ditemukan",
               value: {
-                message: parsed.statusPaket || "Data tidak ditemukan",
+                message: "Data paket tidak lengkap atau kadaluarsa",
               },
               kuota: "0",
             };
           } catch (err) {
-            // ❗ ERROR TEKNIS SAJA
+            // ❗ ERROR TEKNIS (Network/Code Crash)
+            console.log(err);
             return {
+              kind: "FAILED",
               id,
               sn,
               msisdn,
               url: url_check,
-              statusPaket: "Error",
+              statusPaket: `Error`,
               value: { message: err.message },
               kuota: "0",
             };
@@ -454,264 +448,90 @@ export default class CheckService {
   // insertDB: optimized batch path
   // ----------------------------
   static async insertDB(results, opts = {}) {
-    console.log("start insert log (batch-optimized)");
-
-    const BATCH_SIZE = opts.batchSize ?? 1000;
-    const parallelProcess = opts.parallelProcess ?? 50;
+    const BATCH_SIZE = opts.batchSize ?? 500;
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-    const safe = (val, fallback = null) => (val === undefined ? fallback : val);
-
-    function shouldFail(data) {
-      const statusPaket = (data.statusPaket || "").toLowerCase();
-
-      if (statusPaket.startsWith("error")) {
-        return true;
-      }
-      if (statusPaket.includes("pending paket")) {
-        return false;
-      }
-      if (statusPaket === "value") {
-        return false;
-      }
-      return false;
-    }
-
-    // prepare normalized minimal payloads (lightweight)
+    // 1. Normalisasi & Tentukan Nasib (Success/Failed)
     const normalized = results.map((data) => {
-      const sn = safe(normalize(data.serialNumber, data.sn), null);
-      const msisdn = safe(normalize(data.phoneNumber, data.msisdn), null);
-      const masaTungguTanggal = safe(
-        normalize(data.masaTunggu?.tanggal, null),
-        null,
-      );
-      const status = safe(normalize(data.masaTunggu?.status, null), null);
-      const statusPaket = safe(normalize(data.statusPaket, null), null);
-      const kuota = safe(normalize(data.kuota, "0"), "0");
-      const check_quota_id = safe(data.id, null);
-
-      const value_check =
-        data.value && Object.keys(data.value).length > 0
-          ? data.value
-          : { message: "coba periksa url", sn, msisdn };
+      const isErrorKind = data.kind === "FAILED";
+      // Logic status_paket (Principal Engineer must be precise!)
+      const statusPaket = data.statusPaket || "";
+      const isFailed =
+        isErrorKind || statusPaket.toLowerCase().startsWith("error");
 
       return {
-        id: data.id,
-        sn,
-        msisdn,
-        masa_tunggu_kartu: masaTungguTanggal,
-        status,
-        status_paket: statusPaket,
-        kuota,
-        check_quota_id,
-        value_check,
+        ...data, // simpan data asli buat bantu mapping
+        check_quota_id: data.id,
         date: today,
         date_check: new Date(),
-        // will fill ref later
-        ref: 1,
-        isFailed: shouldFail(data),
+        isFailed: isFailed,
+        newStatus: isFailed ? 2 : 4,
+        payload: {
+          sn: normalize(data.serialNumber, data.sn),
+          msisdn: normalize(data.phoneNumber, data.msisdn),
+          masa_tunggu_kartu: normalize(data.masa_tunggu?.tanggal, null),
+          status: normalize(data.masa_tunggu?.status, null),
+          status_paket: statusPaket,
+          kuota: data.kuota || "0",
+          check_quota_id: data.id,
+          date: today,
+          date_check: new Date(),
+          value_check: data.value || { message: "check url", id: data.id },
+          ref: 1,
+        },
       };
     });
-    const insertedSet = new Set();
 
-    // 1) batch prefetch: find which (check_quota_id, date) already exist
-    const checkQuotaIds = [
-      ...new Set(
-        normalized.map((r) => r.check_quota_id).filter((x) => x != null),
-      ),
-    ];
-
-    // map of check_quota_id -> boolean (exists today)
-    let existingMap = {};
-    if (checkQuotaIds.length > 0) {
-      try {
-        const existingRows = await CheckRepository.getExistingLogs(
-          checkQuotaIds,
-          today,
-        );
-        // existingRows: array of { check_quota_id, date, count }
-        existingMap = existingRows.reduce((acc, row) => {
-          acc[String(row.check_quota_id)] = true;
-          return acc;
-        }, {});
-      } catch (err) {
-        console.error("Error prefetch existing logs:", err.message);
-        existingMap = {};
-      }
-    }
-
-    // 2) batch prefetch lastRef per check_quota_id
-    let lastRefMap = {};
-    if (checkQuotaIds.length > 0) {
-      try {
-        const lastRefs = await CheckRepository.getLastRefs(
-          checkQuotaIds,
-          today,
-        );
-        // lastRefs: array of { check_quota_id, lastRef }
-        lastRefMap = lastRefs.reduce((acc, row) => {
-          acc[String(row.check_quota_id)] = row.lastRef || 0;
-          return acc;
-        }, {});
-      } catch (err) {
-        console.error("Error prefetch lastRef:", err.message);
-        lastRefMap = {};
-      }
-    }
-
-    // 3) assign refs in-memory — preserve ordering per check_quota_id
-    // const perIdCounter = {}; // map id -> counter for current run
-    // for (const item of normalized) {
-    //   const id = String(item.check_quota_id);
-    //   const base = parseInt(lastRefMap[id] || 0, 10);
-    //   if (!perIdCounter[id]) perIdCounter[id] = 0;
-    //   perIdCounter[id] += 1;
-    //   // if already exists in db, we still insert as new ref = base + counter
-    //   item.ref = base + perIdCounter[id];
-    // }
+    // 2. Pisahkan Bucket
+    const successBuffer = [];
+    const errorBuffer = [];
+    const statusPairs = [];
 
     for (const item of normalized) {
-      const id = String(item.check_quota_id);
-      if (!id) continue;
-
-      // 🚫 sudah pernah insert di run ini → skip total
-      if (insertedSet.has(id)) continue;
-
-      insertedSet.add(id);
-
-      const base = parseInt(lastRefMap[id] || 0, 10);
-      item.ref = base + 1;
+      statusPairs.push({ id: item.id, newStatus: item.newStatus });
+      if (item.isFailed) {
+        errorBuffer.push(item.payload);
+      } else {
+        successBuffer.push(item.payload);
+      }
     }
 
-    // 4) Build batches and insert in bulk (with retry strategy)
-    const buffer = [];
-    const bulkInsertChunk = async (rowsChunk) => {
-      if (!rowsChunk || rowsChunk.length === 0) return;
-      try {
-        await CheckRepository.insertBulk(rowsChunk);
-      } catch (err) {
-        console.error("Bulk insert failed:", err.message);
-        // fallback: per-row insert with retry
-        for (const row of rowsChunk) {
-          let tries = 0;
-          const maxTries = 3;
-          while (tries < maxTries) {
-            tries++;
-            try {
-              await CheckRepository.insert(row);
-              break;
-            } catch (e) {
-              console.error(
-                `Fallback insert failed (try=${tries}) for sn=${row.sn}:`,
-                e.message,
-              );
-              if (tries >= maxTries) {
-                console.error("Giving up for row:", row);
-              } else {
-                await new Promise((r) => setTimeout(r, 500 * tries));
-              }
-            }
-          }
-        }
+    // 3. Eksekusi Bulk (Computational Thinking: Efficiency)
+    const runBatch = async (data, repoMethod) => {
+      for (let i = 0; i < data.length; i += BATCH_SIZE) {
+        const chunk = data.slice(i, i + BATCH_SIZE);
+        await repoMethod(chunk);
       }
     };
 
-    // 5) prepare status update pairs for bulk status update (id -> newStatus)
-    // determine new status per check_quota row: isFailed => 2 else 4, but if pending paket then keep 1? original logic: pending paket => false (not failed) => newStatus=4
-    const statusPairs = []; // { id, newStatus }
-    for (const item of normalized) {
-      const newStatus = item.isFailed ? 2 : 4;
-      statusPairs.push({ id: item.id, newStatus });
-    }
-
-    // 6) Streaming insertion: flush when buffer reaches BATCH_SIZE
-    const insertedOnce = new Set();
-
-    for (const item of normalized) {
-      const id = String(item.check_quota_id);
-      if (!id) continue;
-
-      // 🚫 jaga keras: hanya 1 insert per run
-      if (insertedOnce.has(id)) continue;
-      insertedOnce.add(id);
-
-      const toInsert = {
-        sn: item.sn,
-        msisdn: item.msisdn,
-        masa_tunggu_kartu: item.masa_tunggu_kartu,
-        value_check: item.value_check,
-        date_check: item.date_check,
-        status: item.status,
-        status_paket: item.status_paket,
-        kuota: item.kuota,
-        check_quota_id: item.check_quota_id,
-        date: item.date,
-        ref: item.ref,
-      };
-
-      buffer.push(toInsert);
-
-      if (buffer.length >= BATCH_SIZE) {
-        const chunk = buffer.splice(0, BATCH_SIZE);
-        await bulkInsertChunk(chunk);
-      }
-    }
-
-    // for (const item of normalized) {
-    //   const toInsert = {
-    //     sn: item.sn,
-    //     msisdn: item.msisdn,
-    //     masa_tunggu_kartu: item.masa_tunggu_kartu,
-    //     value_check: item.value_check,
-    //     date_check: item.date_check,
-    //     status: item.status,
-    //     status_paket: item.status_paket,
-    //     kuota: item.kuota,
-    //     check_quota_id: item.check_quota_id,
-    //     date: item.date,
-    //     ref: item.ref,
-    //   };
-    //   buffer.push(toInsert);
-    //   if (buffer.length >= BATCH_SIZE) {
-    //     const chunk = buffer.splice(0, BATCH_SIZE);
-    //     await bulkInsertChunk(chunk);
-    //   }
-    // }
-
-    // flush remaining
-    if (buffer.length > 0) {
-      await bulkInsertChunk(buffer.splice(0, buffer.length));
-    }
-
-    // 7) bulk update statuses using single query (CASE WHEN)
     try {
-      // compress statusPairs by id (last wins)
-      const mapPairs = {};
-      for (const p of statusPairs) mapPairs[p.id] = p.newStatus;
-      const pairs = Object.entries(mapPairs).map(([id, newStatus]) => ({
-        id: Number(id),
-        newStatus,
-      }));
-      if (pairs.length > 0) {
-        await CheckRepository.bulkUpdateStatuses(pairs);
+      // 1. Insert Success dulu
+      if (successBuffer.length > 0) {
+        await runBatch(
+          successBuffer,
+          CheckRepository.insertBulkSuccess.bind(CheckRepository),
+        );
       }
-    } catch (err) {
-      console.error("Bulk status update failed:", err.message);
-      // fallback: per-row update
-      for (const p of statusPairs) {
-        try {
-          await CheckRepository.updateStatus(p.id, p.newStatus);
-        } catch (e) {
-          console.error(
-            `Fallback status update failed for id=${p.id}:`,
-            e.message,
-          );
-        }
-      }
-    }
 
-    console.log("Insert batch selesai ✅");
+      // 2. Insert Error kemudian
+      if (errorBuffer.length > 0) {
+        await runBatch(
+          errorBuffer,
+          CheckRepository.insertBulkError.bind(CheckRepository),
+        );
+      }
+
+      // 3. Update Status Terakhir (Pakai chunking yang baru dibuat)
+      if (statusPairs.length > 0) {
+        await CheckRepository.bulkUpdateStatuses(statusPairs, BATCH_SIZE);
+      }
+
+      console.log("Semua data berhasil dipilah dan disimpan! (/'3')/");
+    } catch (err) {
+      console.error("Duh, ada yang error pas batch insert:", err.message);
+      throw err;
+    }
   }
 
   // keep other methods as-is (updateStatus, resetStatusGst, listResetGst, resetStatusGstStuck)

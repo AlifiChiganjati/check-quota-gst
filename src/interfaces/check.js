@@ -47,9 +47,9 @@ const processCleanup = async (consoleId) => {
   console.log(`Reset stuck status=1 → 0: ${resetStuckCount}`);
 
   // Ambil hasil reset error abnormal
-  // const resetResult = await CheckService.resetAllErrorToZero(consoleId);
-  // console.log(`🟡 Ditemukan error abnormal: ${resetResult.found}`);
-  // console.log(`🟢 Berhasil reset status=3 → 0: ${resetResult.affectedRows}`);
+  const resetResult = await CheckService.resetAllErrorToZero(consoleId);
+  console.log(`🟡 Ditemukan error abnormal: ${resetResult.found}`);
+  console.log(`🟢 Berhasil reset status=3 → 0: ${resetResult.affectedRows}`);
 
   console.log("Cleanup selesai ✅");
 };

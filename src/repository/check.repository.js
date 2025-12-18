@@ -53,7 +53,45 @@ export default class CheckRepository {
     }
   }
 
-  static async insert(data) {
+  static async insertError(data) {
+    const {
+      sn,
+      msisdn,
+      masa_tunggu_kartu,
+      value_check,
+      date_check,
+      status,
+      status_paket,
+      kuota,
+      check_quota_id,
+      date,
+      ref = 1,
+    } = data;
+
+    const sql = `
+  INSERT INTO gst_log_check_quota_error
+  (sn, msisdn, masa_tunggu_kartu, value_check, date_check, status, status_paket, kuota, check_quota_id, date, ref)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
+    const values = [
+      sn,
+      msisdn,
+      masa_tunggu_kartu,
+      JSON.stringify(value_check),
+      date_check,
+      status,
+      status_paket,
+      kuota,
+      check_quota_id,
+      date,
+      ref,
+    ];
+
+    return await db.execute(sql, values);
+  }
+
+  static async insertSuccess(data) {
     const {
       sn,
       msisdn,
@@ -90,9 +128,47 @@ export default class CheckRepository {
 
     return await db.execute(sql, values);
   }
+  // Tambahkan di check.repository.js
+  static async insertBulkError(batch) {
+    if (!Array.isArray(batch) || batch.length === 0) return null;
+    const cols = [
+      "sn",
+      "msisdn",
+      "masa_tunggu_kartu",
+      "value_check",
+      "date_check",
+      "status",
+      "status_paket",
+      "kuota",
+      "check_quota_id",
+      "date",
+      "ref",
+    ];
+    const placeholders = new Array(batch.length)
+      .fill("(" + cols.map(() => "?").join(",") + ")")
+      .join(",");
+    const sql = `INSERT INTO gst_log_check_quota_error (${cols.join(",")}) VALUES ${placeholders} ON DUPLICATE KEY UPDATE ref = ref + 1, date_check = VALUES(date_check)`;
 
+    const values = [];
+    for (const row of batch) {
+      values.push(
+        row.sn,
+        row.msisdn,
+        row.masa_tunggu_kartu,
+        JSON.stringify(row.value_check),
+        row.date_check,
+        row.status,
+        row.status_paket,
+        row.kuota,
+        row.check_quota_id,
+        row.date,
+        row.ref,
+      );
+    }
+    return await db.query(sql, values);
+  }
   // Bulk insert optimized
-  static async insertBulk(batch) {
+  static async insertBulkSuccess(batch) {
     if (!Array.isArray(batch) || batch.length === 0) return null;
 
     const cols = [
@@ -114,7 +190,7 @@ export default class CheckRepository {
       .fill(placeholdersPerRow)
       .join(",");
 
-    const sql = `INSERT INTO gst_log_check_quota (${cols.join(",")}) VALUES ${placeholders}`;
+    const sql = `INSERT INTO gst_log_check_quota (${cols.join(",")}) VALUES ${placeholders} ON DUPLICATE KEY UPDATE ref = ref + 1, date_check = VALUES(date_check)`;
 
     const values = [];
     for (const row of batch) {
@@ -231,14 +307,18 @@ export default class CheckRepository {
   }
 
   // Bulk update statuses (id -> newStatus) using single UPDATE CASE WHEN
-  static async bulkUpdateStatuses(pairs) {
+  static async bulkUpdateStatuses(pairs, batchSize = 500) {
     if (!Array.isArray(pairs) || pairs.length === 0) return null;
-    // pairs: [{id, newStatus}, ...]
-    const ids = pairs.map((p) => p.id);
-    const cases = pairs
-      .map((p) => `WHEN ${p.id} THEN ${p.newStatus}`)
-      .join(" ");
-    const sql = `
+
+    // Kita bagi pairs menjadi chunk kecil
+    for (let i = 0; i < pairs.length; i += batchSize) {
+      const chunk = pairs.slice(i, i + batchSize);
+      const ids = chunk.map((p) => p.id);
+      const cases = chunk
+        .map((p) => `WHEN ${p.id} THEN ${p.newStatus}`)
+        .join(" ");
+
+      const sql = `
       UPDATE gst_check_quota
       SET status = CASE id
         ${cases}
@@ -246,10 +326,11 @@ export default class CheckRepository {
       END
       WHERE id IN (?)
     `;
-    const [result] = await db.query(sql, [ids]);
-    return result;
-  }
 
+      await db.query(sql, [ids]);
+    }
+    return { success: true };
+  }
   static async getLastRef(check_quota_id, date) {
     const [rows] = await db.query(
       `SELECT COALESCE(MAX(ref), 0) AS lastRef 
