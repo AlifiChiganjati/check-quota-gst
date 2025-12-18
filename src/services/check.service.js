@@ -1,3 +1,4 @@
+//service
 import CheckRepository from "../repository/check.repository.js";
 import * as cheerio from "cheerio";
 import { normalize } from "../utils/normalize.js";
@@ -40,6 +41,16 @@ class RateLimiter {
       await new Promise((r) => setTimeout(r, 50));
     }
   }
+}
+function isValidTextValue(val) {
+  if (!val) return false;
+
+  const text = String(val).trim().toLowerCase();
+
+  if (!text) return false;
+  if (text === "-" || text === "n/a" || text === "null") return false;
+
+  return true;
 }
 
 /* =========================
@@ -100,32 +111,51 @@ function cleanBrokenDate(text) {
   const m = text.match(/(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})/);
   return m ? m[1] : text.trim();
 }
-function extractMasaTungguPaket($) {
-  // 1️⃣ primary path
-  let text = getValueRow(
-    $(".info-item:has(.title:contains('Value'))").length
-      ? $(".info-item:has(.title:contains('Value'))")
-      : $("tbody"),
-    "Masa Tunggu Paket",
-  );
+function validateParsedDate(date, rawText) {
+  if (!date || !(date instanceof Date)) return false;
+  if (isNaN(date.getTime())) return false;
 
-  let parsed = parseDate(text);
-  if (parsed && isValidYear(parsed)) {
-    return { text, parsed };
+  // wajib ada tahun 4 digit di text
+  if (!/\b\d{4}\b/.test(rawText)) return false;
+
+  const year = date.getFullYear();
+
+  if (year < VALID_YEAR_MIN || year > VALID_YEAR_MAX) {
+    return false;
   }
 
-  // 2️⃣ fallback selector (same DOM)
+  return true;
+}
+
+function extractMasaTungguPaket($) {
+  const $container = $(".info-item:has(.title:contains('Value'))").length
+    ? $(".info-item:has(.title:contains('Value'))")
+    : $("tbody");
+
+  let text = getValueRow($, $container, "Masa Tunggu Paket");
+
+  const parsed = parseDate(text);
+
+  if (validateParsedDate(parsed, text)) {
+    return { text, parsed, valid: true };
+  }
+
+  // fallback
   const fallbackText = normalizeText(
     $(".other-title:contains('Masa Tunggu Paket')").next(".other-value").text(),
   );
 
   const fallbackParsed = parseDate(fallbackText);
-  if (fallbackParsed && isValidYear(fallbackParsed)) {
-    return { text: fallbackText, parsed: fallbackParsed };
+
+  if (validateParsedDate(fallbackParsed, fallbackText)) {
+    return { text: fallbackText, parsed: fallbackParsed, valid: true };
   }
 
-  // 3️⃣ still invalid
-  return { text: fallbackText || text, parsed: null };
+  return {
+    text,
+    parsed,
+    valid: false,
+  };
 }
 
 /* =========================
@@ -138,18 +168,36 @@ function normalizeText(txt) {
     .trim();
 }
 
-function getValueRow($container, title) {
+// function getValueRow($container, title) {
+//   let foundText = "";
+//   $container.find("tr").each((_, el) => {
+//     const titleTd = normalizeText(
+//       cheerio.load(el)("td.other-title").text(),
+//     ).toLowerCase();
+//
+//     if (titleTd.includes(title.toLowerCase())) {
+//       foundText = normalizeText(cheerio.load(el)("td.other-value").text());
+//       return false;
+//     }
+//   });
+//   return foundText;
+// }
+function getValueRow($, $container, title) {
   let foundText = "";
+
   $container.find("tr").each((_, el) => {
+    const $el = $(el);
+
     const titleTd = normalizeText(
-      cheerio.load(el)("td.other-title").text(),
+      $el.find("td.other-title").text(),
     ).toLowerCase();
 
     if (titleTd.includes(title.toLowerCase())) {
-      foundText = normalizeText(cheerio.load(el)("td.other-value").text());
-      return false;
+      foundText = normalizeText($el.find("td.other-value").text());
+      return false; // break
     }
   });
+
   return foundText;
 }
 
@@ -194,29 +242,43 @@ async function parsePage({ url, rateLimiter }) {
     (_, el) => $(el).find(".title").text().trim() === "Pending Paket",
   );
 
+  let pending = {
+    kuota: "",
+    redeem: "",
+  };
+
+  if (pendingItem.length > 0) {
+    pending.kuota = getValueRow($, pendingItem, "Kuota");
+
+    pending.redeem = cleanBrokenDate(
+      getValueRow($, pendingItem, "Dapat di redeem hingga"),
+    );
+  }
+
   let valueItem = $(".info-item").filter(
     (_, el) => $(el).find(".title").text().trim() === "Value",
   );
 
   if (valueItem.length === 0) valueItem = $("tbody");
 
-  const masaWaktu = getValueRow(valueItem, "Masa Waktu");
-  const kuotaNasional = getValueRow(valueItem, "Kuota Nasional");
-  const kuotaLokal = getValueRow(valueItem, "Kuota Lokal");
-  const lainnya = getValueRow(valueItem, "Lainnya");
+  // const masaWaktu = getValueRow(valueItem, "Masa Waktu");
+  // const kuotaNasional = getValueRow(valueItem, "Kuota Nasional");
+  // const kuotaLokal = getValueRow(valueItem, "Kuota Lokal");
+  // const lainnya = getValueRow(valueItem, "Lainnya");
+  const masaWaktu = getValueRow($, valueItem, "Masa Waktu");
+  const kuotaNasional = getValueRow($, valueItem, "Kuota Nasional");
+  const kuotaLokal = getValueRow($, valueItem, "Kuota Lokal");
+  const lainnya = getValueRow($, valueItem, "Lainnya");
 
   let masaTungguPaket = "";
   let statusPaket = "";
 
-  const { text, parsed } = extractMasaTungguPaket($);
-
-  if (masaWaktu && parsed) {
-    masaTungguPaket = formatDate(parsed);
+  const parsedMasaTunggu = extractMasaTungguPaket($);
+  if (masaWaktu && parsedMasaTunggu.valid) {
+    masaTungguPaket = formatDate(parsedMasaTunggu.parsed);
     statusPaket = "Value";
-  } else {
-    masaTungguPaket = text;
-    statusPaket = "Error";
   }
+  const pageError = $("p").first().text().trim() || null;
 
   return {
     serialNumber,
@@ -226,9 +288,13 @@ async function parsePage({ url, rateLimiter }) {
     kuotaNasional,
     kuotaLokal,
     lainnya,
-    masaTungguPaket,
+    masaTungguPaket: parsedMasaTunggu.valid
+      ? formatDate(parsedMasaTunggu.parsed)
+      : "",
+    masaTungguPaketValid: parsedMasaTunggu.valid, // 🔑 PENTING
     statusPaket,
-    pendingItem,
+    pending,
+    pageError,
   };
 }
 
@@ -268,15 +334,42 @@ export default class CheckService {
               parseGB(parsed.lainnya);
 
             // ===============================
+            // PENDING MODE
+            // ===============================
+            const kuotaPending = parsed.pending?.kuota;
+            let redeemPending = parsed.pending?.redeem;
+
+            const redeemParsed = parseDate(redeemPending);
+            if (isValidYear(redeemParsed)) {
+              redeemPending = formatDate(redeemParsed);
+            }
+            if (parsed.pending && parsed.pending.kuota) {
+              return {
+                id,
+                sn,
+                msisdn,
+                url: url_check,
+                serialNumber: parsed.serialNumber,
+                phoneNumber: parsed.phoneNumber,
+                masaTunggu: parsed.masaTunggu,
+                statusPaket: "Pending Paket",
+                value: {
+                  kuota_pending: kuotaPending || null,
+                  redeem_pending: redeemPending || null,
+                },
+                kuota: "0",
+              };
+            }
+
+            // ===============================
             // HAS MEANINGFUL VALUE (CORE)
             // ===============================
             const hasMeaningfulValue =
-              (parsed.masaWaktu && parsed.masaWaktu.trim().length > 0) ||
+              (parsed.masaWaktu && isValidTextValue(parsed.masaWaktu)) ||
               parseGB(parsed.kuotaNasional) > 0 ||
               parseGB(parsed.kuotaLokal) > 0 ||
               parseGB(parsed.lainnya) > 0 ||
-              (parsed.masaTungguPaket &&
-                parsed.masaTungguPaket.trim().length > 0);
+              parsed.masaTungguPaketValid === true;
 
             // ===============================
             // VALUE MODE (PAKET AKTIF)
@@ -302,35 +395,22 @@ export default class CheckService {
               };
             }
 
-            // ===============================
-            // PENDING MODE
-            // ===============================
-            const kuotaPending = getValueRow(parsed.pendingItem, "Kuota");
-            let redeemPending = cleanBrokenDate(
-              getValueRow(parsed.pendingItem, "Dapat di redeem hingga"),
-            );
+            // HARD GUARD: SN & MSISDN wajib ada
+            if (!parsed.serialNumber || !parsed.phoneNumber) {
+              const errorMsg =
+                parsed.pageError || "SN and MSISDN Tidak ditemukan";
 
-            const redeemParsed = parseDate(redeemPending);
-            if (isValidYear(redeemParsed)) {
-              redeemPending = formatDate(redeemParsed);
-            }
-
-            if (
-              (kuotaPending && kuotaPending.trim().length > 0) ||
-              (redeemPending && redeemPending.trim().length > 0)
-            ) {
               return {
                 id,
                 sn,
                 msisdn,
                 url: url_check,
-                serialNumber: parsed.serialNumber,
-                phoneNumber: parsed.phoneNumber,
+                serialNumber: parsed.serialNumber ?? null,
+                phoneNumber: parsed.phoneNumber ?? null,
                 masaTunggu: parsed.masaTunggu,
-                statusPaket: "Pending Paket",
+                statusPaket: `Error: ${errorMsg}`,
                 value: {
-                  kuota_pending: kuotaPending,
-                  redeem_pending: redeemPending,
+                  message: errorMsg,
                 },
                 kuota: "0",
               };
@@ -433,6 +513,7 @@ export default class CheckService {
         isFailed: shouldFail(data),
       };
     });
+    const insertedSet = new Set();
 
     // 1) batch prefetch: find which (check_quota_id, date) already exist
     const checkQuotaIds = [
@@ -480,14 +561,27 @@ export default class CheckService {
     }
 
     // 3) assign refs in-memory — preserve ordering per check_quota_id
-    const perIdCounter = {}; // map id -> counter for current run
+    // const perIdCounter = {}; // map id -> counter for current run
+    // for (const item of normalized) {
+    //   const id = String(item.check_quota_id);
+    //   const base = parseInt(lastRefMap[id] || 0, 10);
+    //   if (!perIdCounter[id]) perIdCounter[id] = 0;
+    //   perIdCounter[id] += 1;
+    //   // if already exists in db, we still insert as new ref = base + counter
+    //   item.ref = base + perIdCounter[id];
+    // }
+
     for (const item of normalized) {
       const id = String(item.check_quota_id);
+      if (!id) continue;
+
+      // 🚫 sudah pernah insert di run ini → skip total
+      if (insertedSet.has(id)) continue;
+
+      insertedSet.add(id);
+
       const base = parseInt(lastRefMap[id] || 0, 10);
-      if (!perIdCounter[id]) perIdCounter[id] = 0;
-      perIdCounter[id] += 1;
-      // if already exists in db, we still insert as new ref = base + counter
-      item.ref = base + perIdCounter[id];
+      item.ref = base + 1;
     }
 
     // 4) Build batches and insert in bulk (with retry strategy)
@@ -532,7 +626,16 @@ export default class CheckService {
     }
 
     // 6) Streaming insertion: flush when buffer reaches BATCH_SIZE
+    const insertedOnce = new Set();
+
     for (const item of normalized) {
+      const id = String(item.check_quota_id);
+      if (!id) continue;
+
+      // 🚫 jaga keras: hanya 1 insert per run
+      if (insertedOnce.has(id)) continue;
+      insertedOnce.add(id);
+
       const toInsert = {
         sn: item.sn,
         msisdn: item.msisdn,
@@ -546,12 +649,35 @@ export default class CheckService {
         date: item.date,
         ref: item.ref,
       };
+
       buffer.push(toInsert);
+
       if (buffer.length >= BATCH_SIZE) {
         const chunk = buffer.splice(0, BATCH_SIZE);
         await bulkInsertChunk(chunk);
       }
     }
+
+    // for (const item of normalized) {
+    //   const toInsert = {
+    //     sn: item.sn,
+    //     msisdn: item.msisdn,
+    //     masa_tunggu_kartu: item.masa_tunggu_kartu,
+    //     value_check: item.value_check,
+    //     date_check: item.date_check,
+    //     status: item.status,
+    //     status_paket: item.status_paket,
+    //     kuota: item.kuota,
+    //     check_quota_id: item.check_quota_id,
+    //     date: item.date,
+    //     ref: item.ref,
+    //   };
+    //   buffer.push(toInsert);
+    //   if (buffer.length >= BATCH_SIZE) {
+    //     const chunk = buffer.splice(0, BATCH_SIZE);
+    //     await bulkInsertChunk(chunk);
+    //   }
+    // }
 
     // flush remaining
     if (buffer.length > 0) {

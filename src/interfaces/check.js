@@ -56,9 +56,8 @@ const processCleanup = async (consoleId) => {
 
 const check = async (consoleId) => {
   console.log("🚀 Mulai proses check:", new Date().toLocaleString());
-  const MAX_CYCLE = 15000;
 
-  for (let cycle = 1; cycle <= MAX_CYCLE; cycle++) {
+  while (true) {
     let internet = await isInternetAvailable();
     while (!internet) {
       console.log("⚠️ Internet mati, menunggu 5 detik...");
@@ -68,16 +67,16 @@ const check = async (consoleId) => {
 
     try {
       const hasMore = await processCheckBatch(consoleId);
-      if (!hasMore) break;
+
+      // ⛔ kondisi berhenti utama
+      if (!hasMore) {
+        console.log("✅ Tidak ada data lagi, hentikan loop check");
+        break;
+      }
     } catch (err) {
       console.error("❌ Error saat step check/insert:", err);
       console.error("Stack trace:", err?.stack);
       await delay(5000);
-    }
-
-    if (cycle === MAX_CYCLE) {
-      console.log("❌ Maksimal loop tercapai, hentikan proses untuk keamanan");
-      break;
     }
   }
 
