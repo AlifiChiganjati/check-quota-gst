@@ -587,13 +587,13 @@ export default class CheckService {
   static async resetAllErrorToZero(consoleId) {
     try {
       const result = await CheckRepository.resetAllGstErrorToZero(consoleId);
-      if (result.affectedRows === 0) {
-        console.log(result);
+      if (result.found) {
+        console.log(result.found);
+        console.log(
+          `Reset abnormal errors -> 0 (found: ${result.found}, updated: ${result.affectedRows})`,
+        );
       }
 
-      console.log(
-        `Reset abnormal errors -> 0 (found: ${result.found}, updated: ${result.affectedRows})`,
-      );
       return result;
     } catch (error) {
       console.error("resetAllErrorToZero ERROR:", error);

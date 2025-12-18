@@ -208,7 +208,7 @@ export default class CheckRepository {
         row.ref ?? 1,
       );
     }
-
+    A;
     // Use pool.query for large placeholders
     return await db.query(sql, values);
   }
@@ -343,23 +343,10 @@ export default class CheckRepository {
 
   static async getAllGstError(consoleId) {
     const [rows] = await db.query(
-      `SELECT l.check_quota_id
-  FROM gst_log_check_quota AS l
-  JOIN gst_check_quota AS c
-      ON l.check_quota_id = c.id
-  WHERE l.status_paket NOT IN (
-      'Pending Paket',
-      'Value',
-      'Error: Data tidak ditemukan',
-      'Error: SN and MSISDN Tidak ditemukan',
-      'Error: MSISDN Tidak ditemukan'
-  )
-  AND l.date = CURDATE()
-  AND c.console=?
-  AND c.status=2;
-  `,
+      `SELECT id FROM gst_check_quota WHERE console=? AND status=2`,
       [consoleId],
     );
+    // console.log(rows);
     return rows;
   }
 
@@ -369,7 +356,7 @@ export default class CheckRepository {
     if (!errorRows || errorRows.length === 0) {
       return { affectedRows: 0, message: "No abnormal errors found" };
     }
-    const ids = errorRows.map((r) => r.check_quota_id);
+    const ids = errorRows.map((r) => r.id);
     console.log(ids);
 
     const sql = `
