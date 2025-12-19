@@ -45,11 +45,44 @@ class RateLimiter {
 function isValidTextValue(val) {
   if (!val) return false;
 
-  const text = String(val).trim().toLowerCase();
-
+  const text = String(val).trim();
   if (!text) return false;
-  if (text === "-" || text === "n/a" || text === "null") return false;
 
+  const lowered = text.toLowerCase();
+  if (lowered === "-" || lowered === "n/a" || lowered === "null") return false;
+
+  // =========================
+  // DATE-AWARE VALIDATION
+  // =========================
+
+  // Deteksi kandidat tanggal: ada tahun 4 digit
+  const looksLikeDate = /\b\d{4}\b/.test(text);
+
+  if (looksLikeDate) {
+    const parsed = parseDate(text);
+
+    // ❌ format salah
+    if (!parsed || isNaN(parsed.getTime())) return false;
+
+    // ❌ tahun ngaco
+    const year = parsed.getFullYear();
+    if (year < VALID_YEAR_MIN || year > VALID_YEAR_MAX) return false;
+
+    // ❌ jam / menit / detik ngaco
+    const hasTime = /(\d{2}):(\d{2})(?::(\d{2}))?/.test(text);
+    if (hasTime) {
+      const [, hh, mm, ss = "0"] =
+        text.match(/(\d{2}):(\d{2})(?::(\d{2}))?/) || [];
+
+      if (Number(hh) > 23 || Number(mm) > 59 || Number(ss) > 59) {
+        return false;
+      }
+    }
+  }
+
+  // =========================
+  // PASSED ALL CHECKS
+  // =========================
   return true;
 }
 
