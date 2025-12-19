@@ -379,8 +379,32 @@ export default class CheckService {
                 kuota: "0",
               };
             }
+            // 4.a HARD FAIL: Masa Tunggu Paket ADA tapi FORMAT INVALID
+            if (
+              parsed.masaWaktu &&
+              isValidTextValue(parsed.masaWaktu) &&
+              parsed.masaTungguPaket &&
+              parsed.masaTungguPaketValid === false
+            ) {
+              return {
+                kind: "FAILED",
+                id,
+                sn,
+                msisdn,
+                url: url_check,
+                serialNumber: parsed.serialNumber,
+                phoneNumber: parsed.phoneNumber,
+                masaTunggu: parsed.masaTunggu,
+                statusPaket: "FAILED: Invalid Masa Tunggu Paket",
+                value: {
+                  message: "Format Masa Tunggu Paket tidak valid",
+                  raw: parsed.masaTungguPaket,
+                },
+                kuota: "0",
+              };
+            }
 
-            // 4. PRIORITAS KETIGA: VALUE MODE (PAKET AKTIF)
+            // 5. PRIORITAS KETIGA: VALUE MODE (PAKET AKTIF)
             const hasMeaningfulValue =
               (parsed.masaWaktu && isValidTextValue(parsed.masaWaktu)) ||
               sisaKuota > 0 ||
@@ -408,7 +432,7 @@ export default class CheckService {
               };
             }
 
-            // 5. FALLBACK TERAKHIR: Kalau semua di atas gagal
+            // 6. FALLBACK TERAKHIR: Kalau semua di atas gagal
             // Berarti halaman kebuka, SN ada, tapi nggak ada paket aktif maupun pending yang valid
             return {
               kind: "FAILED",

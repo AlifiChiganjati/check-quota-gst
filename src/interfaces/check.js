@@ -103,8 +103,8 @@ const runCheck = async (consoleId) => {
 
   await check(consoleId);
 
-  console.log("🕒 Tunggu 2 menit untuk run berikutnya...");
-  setTimeout(() => runCheck(consoleId), 2 * 60 * 1000);
+  console.log("🕒 Tunggu 15 menit untuk run berikutnya...");
+  setTimeout(() => runCheck(consoleId), 15 * 60 * 1000);
 };
 
 export default runCheck;
