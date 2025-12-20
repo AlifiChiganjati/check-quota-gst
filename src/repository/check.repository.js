@@ -208,7 +208,6 @@ export default class CheckRepository {
         row.ref ?? 1,
       );
     }
-    A;
     // Use pool.query for large placeholders
     return await db.query(sql, values);
   }

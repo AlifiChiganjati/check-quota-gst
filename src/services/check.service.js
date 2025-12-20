@@ -244,79 +244,61 @@ async function fetchHtml(url, rateLimiter) {
 }
 
 /* =========================
- * PAGE PARSER (FIXED)
+ * REFACTORED PAGE PARSER
  * ========================= */
 async function parsePage({ url, rateLimiter }) {
   const html = await fetchHtml(url, rateLimiter);
   const $ = cheerio.load(html);
 
-  const getExactValueByTitle = (title) => {
-    const item = $(".info-item").filter(
-      (_, el) =>
-        $(el).find(".title").text().trim().toLowerCase() ===
-        title.toLowerCase(),
-    );
-    return item.find(".single-value").text().trim() || null;
+  // Helper biar nggak DRY & anti-mainstream (/'3')/
+  const findInfoItemByTitle = (title) => {
+    return $(".info-item").filter((_, el) => {
+      const headerText = $(el).find(".title").text().trim();
+      return headerText.toLowerCase().includes(title.toLowerCase());
+    });
   };
 
-  const serialNumber = getExactValueByTitle("Serial Number");
-  const phoneNumber = getExactValueByTitle("Number");
+  // 1. Ambil SN & Number
+  const serialNumber =
+    findInfoItemByTitle("Serial Number").find(".single-value").text().trim() ||
+    null;
+  const phoneNumber =
+    findInfoItemByTitle("Number").find(".single-value").text().trim() || null;
 
-  const masaTungguItem = $(".info-item").filter(
-    (_, el) => $(el).find(".title").text().trim() === "Masa Tunggu Kartu",
-  );
-
+  // 2. Ambil Masa Tunggu Kartu (HASIL DEBUG TADI!)
+  const masaTungguItem = findInfoItemByTitle("Masa Tunggu Kartu");
   const masaTunggu = {
     tanggal: masaTungguItem.find(".date").text().trim(),
     status: masaTungguItem.find(".date-desc").text().trim(),
   };
 
-  const pendingItem = $(".info-item").filter(
-    (_, el) => $(el).find(".title").text().trim() === "Pending Paket",
-  );
-
-  let pending = {
-    kuota: "",
-    redeem: "",
-  };
-
+  // 3. Ambil Pending Paket
+  const pendingItem = findInfoItemByTitle("Pending Paket");
+  let pending = { kuota: "", redeem: "" };
   if (pendingItem.length > 0) {
     pending.kuota = getValueRow($, pendingItem, "Kuota");
-
     pending.redeem = cleanBrokenDate(
       getValueRow($, pendingItem, "Dapat di redeem hingga"),
     );
   }
 
-  let valueItem = $(".info-item").filter(
-    (_, el) => $(el).find(".title").text().trim() === "Value",
-  );
-
+  // 4. Ambil Value Section
+  let valueItem = findInfoItemByTitle("Value");
   if (valueItem.length === 0) valueItem = $("tbody");
 
-  // const masaWaktu = getValueRow(valueItem, "Masa Waktu");
-  // const kuotaNasional = getValueRow(valueItem, "Kuota Nasional");
-  // const kuotaLokal = getValueRow(valueItem, "Kuota Lokal");
-  // const lainnya = getValueRow(valueItem, "Lainnya");
   const masaWaktu = getValueRow($, valueItem, "Masa Waktu");
   const kuotaNasional = getValueRow($, valueItem, "Kuota Nasional");
   const kuotaLokal = getValueRow($, valueItem, "Kuota Lokal");
   const lainnya = getValueRow($, valueItem, "Lainnya");
 
-  let masaTungguPaket = "";
-  let statusPaket = "";
-
+  // 5. Masa Tunggu Paket (Pake logika extract yang sudah ada tapi pastikan dipanggil bener)
   const parsedMasaTunggu = extractMasaTungguPaket($);
-  if (masaWaktu && parsedMasaTunggu.valid) {
-    masaTungguPaket = formatDate(parsedMasaTunggu.parsed);
-    statusPaket = "Value";
-  }
   const pageError = $("p").first().text().trim() || null;
-
+  // console.log(masaTungguItem);
   return {
     serialNumber,
     phoneNumber,
-    masaTunggu,
+    masaTunggu, // <--- SEKARANG GAK AKAN KOSONG LAGI!
     masaWaktu,
     kuotaNasional,
     kuotaLokal,
@@ -324,8 +306,8 @@ async function parsePage({ url, rateLimiter }) {
     masaTungguPaket: parsedMasaTunggu.valid
       ? formatDate(parsedMasaTunggu.parsed)
       : "",
-    masaTungguPaketValid: parsedMasaTunggu.valid, // 🔑 PENTING
-    statusPaket,
+    masaTungguPaketValid: parsedMasaTunggu.valid,
+    statusPaket: masaWaktu && parsedMasaTunggu.valid ? "Value" : "",
     pending,
     pageError,
   };
@@ -438,10 +420,12 @@ export default class CheckService {
             }
 
             // 5. PRIORITAS KETIGA: VALUE MODE (PAKET AKTIF)
+            // Kita kunci: Kalau ada masaWaktu, WAJIB valid masaTungguPaket-nya.
+            // Sisa kuota > 0 tetap dianggap valid sebagai fallback.
             const hasMeaningfulValue =
-              (parsed.masaWaktu && isValidTextValue(parsed.masaWaktu)) ||
-              sisaKuota > 0 ||
-              parsed.masaTungguPaketValid === true;
+              (isValidTextValue(parsed.masaWaktu) &&
+                parsed.masaTungguPaketValid === true) ||
+              sisaKuota > 0;
 
             if (hasMeaningfulValue) {
               return {
@@ -464,7 +448,6 @@ export default class CheckService {
                 kuota: `${sisaKuota}`,
               };
             }
-
             // 6. FALLBACK TERAKHIR: Kalau semua di atas gagal
             // Berarti halaman kebuka, SN ada, tapi nggak ada paket aktif maupun pending yang valid
             return {
@@ -527,8 +510,8 @@ export default class CheckService {
         payload: {
           sn: normalize(data.serialNumber, data.sn),
           msisdn: normalize(data.phoneNumber, data.msisdn),
-          masa_tunggu_kartu: normalize(data.masa_tunggu?.tanggal, null),
-          status: normalize(data.masa_tunggu?.status, null),
+          masa_tunggu_kartu: normalize(data.masaTunggu?.tanggal, null),
+          status: normalize(data.masaTunggu?.status, null),
           status_paket: statusPaket,
           kuota: data.kuota || "0",
           check_quota_id: data.id,
