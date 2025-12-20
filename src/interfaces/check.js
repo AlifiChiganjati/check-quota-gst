@@ -27,8 +27,8 @@ const processCheckBatch = async (consoleId) => {
 
   // pass optimized options: higher concurrency + tuned rps
   const checked = await CheckService.checkAllUrls(urls, {
-    concurrency: 80,
-    rps: 40,
+    concurrency: 15,
+    rps: 10,
   });
 
   console.log("Insert hasil ke DB...");

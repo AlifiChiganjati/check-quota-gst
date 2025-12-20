@@ -461,7 +461,7 @@ export default class CheckService {
               masaTunggu: parsed.masaTunggu,
               statusPaket: parsed.statusPaket || "Error: Paket tidak ditemukan",
               value: {
-                message: "Data paket tidak lengkap atau kadaluarsa",
+                message: "Data paket tidak lengkap dan akan di check ulang",
               },
               kuota: "0",
             };
