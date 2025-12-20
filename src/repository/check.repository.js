@@ -128,9 +128,11 @@ export default class CheckRepository {
 
     return await db.execute(sql, values);
   }
-  // Tambahkan di check.repository.js
-  static async insertBulkError(batch) {
+
+  // repository/check.repository.js
+  static async insertBulkLog(tableName, batch) {
     if (!Array.isArray(batch) || batch.length === 0) return null;
+
     const cols = [
       "sn",
       "msisdn",
@@ -144,71 +146,42 @@ export default class CheckRepository {
       "date",
       "ref",
     ];
+
     const placeholders = new Array(batch.length)
       .fill("(" + cols.map(() => "?").join(",") + ")")
       .join(",");
-    const sql = `INSERT INTO gst_log_check_quota_error (${cols.join(",")}) VALUES ${placeholders} ON DUPLICATE KEY UPDATE ref = ref + 1, date_check = VALUES(date_check)`;
+
+    const sql = `
+    INSERT INTO ${tableName} (${cols.join(",")}) 
+    VALUES ${placeholders} 
+    ON DUPLICATE KEY UPDATE 
+      ref = ref + 1, 
+      msisdn = VALUES(msisdn),
+      date_check = VALUES(date_check),
+      value_check = VALUES(value_check),
+      status_paket = VALUES(status_paket)
+  `;
 
     const values = [];
     for (const row of batch) {
+      // Pastikan mapping di sini konsisten dengan array 'cols' di atas!
       values.push(
-        row.sn,
-        row.msisdn,
-        row.masa_tunggu_kartu,
-        JSON.stringify(row.value_check),
-        row.date_check,
-        row.status,
-        row.status_paket,
-        row.kuota,
+        row.sn || null,
+        row.msisdn || null, // Sekarang ini aman karena data sudah di-flatten di service
+        row.masa_tunggu_kartu || null,
+        typeof row.value_check === "object"
+          ? JSON.stringify(row.value_check)
+          : row.value_check,
+        row.date_check || new Date(),
+        row.status || null,
+        row.status_paket || null,
+        row.kuota || "0",
         row.check_quota_id,
         row.date,
-        row.ref,
+        row.ref || 1,
       );
     }
-    return await db.query(sql, values);
-  }
-  // Bulk insert optimized
-  static async insertBulkSuccess(batch) {
-    if (!Array.isArray(batch) || batch.length === 0) return null;
 
-    const cols = [
-      "sn",
-      "msisdn",
-      "masa_tunggu_kartu",
-      "value_check",
-      "date_check",
-      "status",
-      "status_paket",
-      "kuota",
-      "check_quota_id",
-      "date",
-      "ref",
-    ];
-
-    const placeholdersPerRow = "(" + cols.map(() => "?").join(",") + ")";
-    const placeholders = new Array(batch.length)
-      .fill(placeholdersPerRow)
-      .join(",");
-
-    const sql = `INSERT INTO gst_log_check_quota (${cols.join(",")}) VALUES ${placeholders} ON DUPLICATE KEY UPDATE ref = ref + 1, date_check = VALUES(date_check)`;
-
-    const values = [];
-    for (const row of batch) {
-      values.push(
-        row.sn ?? null,
-        row.msisdn ?? null,
-        row.masa_tunggu_kartu ?? null,
-        JSON.stringify(row.value_check ?? null),
-        row.date_check ?? null,
-        row.status ?? null,
-        row.status_paket ?? null,
-        row.kuota ?? null,
-        row.check_quota_id ?? null,
-        row.date ?? null,
-        row.ref ?? 1,
-      );
-    }
-    // Use pool.query for large placeholders
     return await db.query(sql, values);
   }
 
@@ -356,7 +329,7 @@ export default class CheckRepository {
       return { affectedRows: 0, message: "No abnormal errors found" };
     }
     const ids = errorRows.map((r) => r.id);
-    console.log(ids);
+    // console.log(ids);
 
     const sql = `
         UPDATE gst_check_quota

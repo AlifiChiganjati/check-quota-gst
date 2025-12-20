@@ -250,22 +250,33 @@ async function parsePage({ url, rateLimiter }) {
   const html = await fetchHtml(url, rateLimiter);
   const $ = cheerio.load(html);
 
-  // Helper biar nggak DRY & anti-mainstream (/'3')/
+  // Pakai Regex agar "Number" tidak nyangkut di "Serial Number"
+  // ^ artinya awal string, $ artinya akhir string (STRICT MATCH)
   const findInfoItemByTitle = (title) => {
     return $(".info-item").filter((_, el) => {
       const headerText = $(el).find(".title").text().trim();
-      return headerText.toLowerCase().includes(title.toLowerCase());
+      // Case insensitive match yang strict (Exact Match)
+      const regex = new RegExp(`^${title}$`, "i");
+      return regex.test(headerText);
     });
   };
 
-  // 1. Ambil SN & Number
   const serialNumber =
     findInfoItemByTitle("Serial Number").find(".single-value").text().trim() ||
     null;
-  const phoneNumber =
-    findInfoItemByTitle("Number").find(".single-value").text().trim() || null;
+  // console.log("serialNumber", serialNumber);
 
-  // 2. Ambil Masa Tunggu Kartu (HASIL DEBUG TADI!)
+  const phoneNumber =
+    $(".info-item")
+      .toArray()
+      .map((el) => ({
+        title: $(el).find(".title").text().trim(),
+        value: $(el).find(".single-value").text().trim(),
+      }))
+      .find((item) => item.title.toLowerCase() === "number")?.value || null;
+
+  console.log("DEBUG - Real PhoneNumber Scraped:", phoneNumber);
+  // 2. Ambil Masa Tunggu Kartu
   const masaTungguItem = findInfoItemByTitle("Masa Tunggu Kartu");
   const masaTunggu = {
     tanggal: masaTungguItem.find(".date").text().trim(),
@@ -336,7 +347,6 @@ export default class CheckService {
         limit(async () => {
           try {
             const parsed = await parsePage({ url: url_check, rateLimiter });
-
             // 1. PRIORITAS PALING TINGGI: Validasi Halaman & Data Identitas
             // Kalau ini kena, langsung stop, jangan cek kuota atau pending lagi!
             if (
@@ -467,7 +477,6 @@ export default class CheckService {
             };
           } catch (err) {
             // ❗ ERROR TEKNIS (Network/Code Crash)
-            console.log(err);
             return {
               kind: "FAILED",
               id,
@@ -492,88 +501,95 @@ export default class CheckService {
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-    // 1. Normalisasi & Tentukan Nasib (Success/Failed)
+    // 1. Transformasi Data (Computational Thinking: Flattening & Normalization)
     const normalized = results.map((data) => {
       const isErrorKind = data.kind === "FAILED";
-      // Logic status_paket (Principal Engineer must be precise!)
       const statusPaket = data.statusPaket || "";
       const isFailed =
         isErrorKind || statusPaket.toLowerCase().startsWith("error");
-
+      // Kita buat object yang FLAT. Tidak ada lagi 'payload: {}' yang bikin bingung!
       return {
-        ...data, // simpan data asli buat bantu mapping
+        // Data untuk logic Service
+        id: data.id,
+        isFailed: isFailed,
+        newStatus: isFailed ? 2 : 4,
+        sn: data.serialNumber || data.sn,
+        msisdn:
+          data.phoneNumber && data.phoneNumber.length > 5
+            ? data.phoneNumber
+            : data.msisdn !== data.sn
+              ? data.msisdn
+              : null,
+        masa_tunggu_kartu: normalize(data.masaTunggu?.tanggal, null),
+        status: normalize(data.masaTunggu?.status, null),
+        status_paket: statusPaket,
+        kuota: data.kuota || "0",
         check_quota_id: data.id,
         date: today,
         date_check: new Date(),
-        isFailed: isFailed,
-        newStatus: isFailed ? 2 : 4,
-        payload: {
-          sn: normalize(data.serialNumber, data.sn),
-          msisdn: normalize(data.phoneNumber, data.msisdn),
-          masa_tunggu_kartu: normalize(data.masaTunggu?.tanggal, null),
-          status: normalize(data.masaTunggu?.status, null),
-          status_paket: statusPaket,
-          kuota: data.kuota || "0",
-          check_quota_id: data.id,
-          date: today,
-          date_check: new Date(),
-          value_check: data.value || { message: "check url", id: data.id },
-          ref: 1,
-        },
+        value_check: data.value || { message: "check url", id: data.id },
+        ref: 1,
       };
     });
 
-    // 2. Pisahkan Bucket
+    // 2. Filter Duplikat (Problem Solver: Data Integrity)
+    const uniqueResults = [];
+    const seenIds = new Set();
+
+    for (const item of normalized) {
+      if (!seenIds.has(item.id)) {
+        uniqueResults.push(item);
+        seenIds.add(item.id);
+      } else {
+        console.log(`Baka! ID ${item.id} duplikat, aku buang ya! (>///<)`);
+      }
+    }
+
+    // 3. Bucket Sorting (Efficiency)
     const successBuffer = [];
     const errorBuffer = [];
     const statusPairs = [];
 
-    for (const item of normalized) {
+    for (const item of uniqueResults) {
       statusPairs.push({ id: item.id, newStatus: item.newStatus });
+
+      // Karena object sudah FLAT, kita tinggal pisahkan berdasarkan status
       if (item.isFailed) {
-        errorBuffer.push(item.payload);
+        errorBuffer.push(item);
       } else {
-        successBuffer.push(item.payload);
+        successBuffer.push(item);
       }
     }
 
-    // 3. Eksekusi Bulk (Computational Thinking: Efficiency)
-    const runBatch = async (data, repoMethod) => {
+    // 4. Batch Execution (DRY Principle)
+    const runBatch = async (data, tableName) => {
       for (let i = 0; i < data.length; i += BATCH_SIZE) {
         const chunk = data.slice(i, i + BATCH_SIZE);
-        await repoMethod(chunk);
+        await CheckRepository.insertBulkLog(tableName, chunk);
       }
     };
 
     try {
-      // 1. Insert Success dulu
+      // Jalankan semua bulk insert
       if (successBuffer.length > 0) {
-        await runBatch(
-          successBuffer,
-          CheckRepository.insertBulkSuccess.bind(CheckRepository),
-        );
+        await runBatch(successBuffer, "gst_log_check_quota");
       }
 
-      // 2. Insert Error kemudian
       if (errorBuffer.length > 0) {
-        await runBatch(
-          errorBuffer,
-          CheckRepository.insertBulkError.bind(CheckRepository),
-        );
+        await runBatch(errorBuffer, "gst_log_check_quota_error");
       }
 
-      // 3. Update Status Terakhir (Pakai chunking yang baru dibuat)
+      // Update status master table
       if (statusPairs.length > 0) {
         await CheckRepository.bulkUpdateStatuses(statusPairs, BATCH_SIZE);
       }
 
-      console.log("Semua data berhasil dipilah dan disimpan! (/'3')/");
+      console.log("Berhasil! Ingat, teliti itu gratis, Chigan-san! (/'3')/");
     } catch (err) {
-      console.error("Duh, ada yang error pas batch insert:", err.message);
+      console.error("Duh, baka! Masih error di insertDB:", err.message);
       throw err;
     }
   }
-
   // keep other methods as-is (updateStatus, resetStatusGst, listResetGst, resetStatusGstStuck)
   static async updateStatus() {
     try {
@@ -628,7 +644,7 @@ export default class CheckService {
     try {
       const result = await CheckRepository.resetAllGstErrorToZero(consoleId);
       if (result.found) {
-        console.log(result.found);
+        // console.log(result.found);
         console.log(
           `Reset abnormal errors -> 0 (found: ${result.found}, updated: ${result.affectedRows})`,
         );
