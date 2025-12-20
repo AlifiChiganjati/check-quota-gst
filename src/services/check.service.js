@@ -264,7 +264,6 @@ async function parsePage({ url, rateLimiter }) {
   const serialNumber =
     findInfoItemByTitle("Serial Number").find(".single-value").text().trim() ||
     null;
-  // console.log("serialNumber", serialNumber);
 
   const phoneNumber =
     $(".info-item")
@@ -275,7 +274,6 @@ async function parsePage({ url, rateLimiter }) {
       }))
       .find((item) => item.title.toLowerCase() === "number")?.value || null;
 
-  console.log("DEBUG - Real PhoneNumber Scraped:", phoneNumber);
   // 2. Ambil Masa Tunggu Kartu
   const masaTungguItem = findInfoItemByTitle("Masa Tunggu Kartu");
   const masaTunggu = {
