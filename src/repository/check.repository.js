@@ -3,56 +3,34 @@ import db from "../config/db.js";
 
 export default class CheckRepository {
   static async getAllUrl(consoleId, limit = 10) {
-    const connection = await db.getConnection();
-
     try {
-      await connection.beginTransaction();
-
-      // STEP 1 — SELECT ID MASIH CEPAT (pakai index)
-      const [idRows] = await connection.query(
-        `SELECT id 
-       FROM gst_check_quota
-       WHERE status = 0
-         AND console = ?
-       ORDER BY id ASC
-       LIMIT ?`,
+      await db.query(
+        `UPDATE gst_check_quota 
+             SET status = 1 
+             WHERE status = 0 
+               AND console = ? 
+             ORDER BY id ASC 
+             LIMIT ?`,
         [consoleId, limit],
       );
 
-      if (idRows.length === 0) {
-        await connection.commit();
-        return [];
-      }
-
-      const ids = idRows.map((r) => r.id);
-
-      // STEP 2 — UPDATE cepat via IN (...)
-      await connection.query(
-        `UPDATE gst_check_quota
-       SET status = 1
-       WHERE id IN (?)`,
-        [ids],
+      // 2. Ambil data yang barusan kita tandai
+      const [rows] = await db.query(
+        `SELECT id, url_check, sn, msisdn 
+             FROM gst_check_quota 
+             WHERE status = 1 
+               AND console = ? 
+             ORDER BY id ASC 
+             LIMIT ?`,
+        [consoleId, limit],
       );
 
-      // STEP 3 — SELECT data lengkapnya
-      const [rows] = await connection.query(
-        `SELECT id, url_check, date_check, status, sn, msisdn
-       FROM gst_check_quota
-       WHERE id IN (?)
-       ORDER BY id ASC`,
-        [ids],
-      );
-
-      await connection.commit();
       return rows;
     } catch (err) {
-      await connection.rollback();
+      console.error("Duh, gagal ambil URL:", err);
       throw err;
-    } finally {
-      connection.release();
     }
   }
-
   // repository/check.repository.js
   static async insertBulkLog(tableName, batch) {
     if (!Array.isArray(batch) || batch.length === 0) return null;
@@ -77,17 +55,8 @@ export default class CheckRepository {
       .join(",");
 
     const sql = `
-    INSERT INTO ${tableName} (${cols.join(",")}) 
-    VALUES ${placeholders} 
-    ON DUPLICATE KEY UPDATE 
-      raw_html = VALUES(raw_html),
-      msisdn = VALUES(msisdn),
-      date_check = VALUES(date_check),
-      value_check = VALUES(value_check),
-      status_paket = VALUES(status_paket),
-      ref = ref + 1 
-`;
-
+INSERT INTO ${tableName} (${cols.join(",")}) 
+VALUES ${placeholders} `;
     const values = [];
     for (const row of batch) {
       // Pastikan mapping di sini konsisten dengan array 'cols' di atas!
@@ -105,7 +74,7 @@ export default class CheckRepository {
         row.kuota || "0",
         row.check_quota_id,
         row.date,
-        1,
+        row.ref,
       );
     }
 

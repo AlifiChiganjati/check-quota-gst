@@ -261,10 +261,14 @@ export default class CheckService {
   // insertDB: optimized batch path
   // ----------------------------
   static async insertDB(results, opts = {}) {
-    const BATCH_SIZE = opts.batchSize ?? 500;
+    const BATCH_SIZE = opts.batchSize ?? 100;
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
+    const allIds = [...new Set(results.map((r) => r.id))];
+    const lastRefsRows = await CheckRepository.getLastRefs(allIds, today);
+    const refMap = new Map(
+      lastRefsRows.map((r) => [r.check_quota_id, r.lastRef]),
+    );
     // 1. Transformasi Data (Computational Thinking: Flattening & Normalization)
     const normalized = results.map((data) => {
       const isErrorKind = data.kind === "FAILED";
@@ -272,6 +276,9 @@ export default class CheckService {
       const isFailed =
         isErrorKind || statusPaket.toLowerCase().startsWith("error");
       // Kita buat object yang FLAT. Tidak ada lagi 'payload: {}' yang bikin bingung!
+      const currentLastRef = refMap.get(data.id) || 0;
+      const nextRef = currentLastRef + 1;
+      refMap.set(data.id, nextRef); // Update map supaya kalau di batch ini ada ID sama lagi, ref-nya lanjut
       return {
         // Data untuk logic Service
         id: data.id,
@@ -293,7 +300,7 @@ export default class CheckService {
         date: today,
         date_check: new Date(),
         value_check: data.value || { message: "check url", id: data.id },
-        ref: 1,
+        ref: nextRef,
       };
     });
 
@@ -347,8 +354,7 @@ export default class CheckService {
       if (statusPairs.length > 0) {
         await CheckRepository.bulkUpdateStatuses(statusPairs, BATCH_SIZE);
       }
-
-      console.log("Berhasil! Ingat, teliti itu gratis, Chigan-san! (/'3')/");
+      console.log("Berhasil! data di insert ke db(/'3')/");
     } catch (err) {
       console.error("Duh, baka! Masih error di insertDB:", err.message);
       throw err;

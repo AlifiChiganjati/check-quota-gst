@@ -4,7 +4,7 @@ import RateLimiter from "../utils/rateLimiter.js";
 
 // --- Configuration ---
 const OPERATIONAL_START = 1; // 01:00
-const OPERATIONAL_END = 12; // 20:00
+const OPERATIONAL_END = 15; // 20:00
 
 // --- Helpers (KISS) ---
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -62,18 +62,26 @@ const ensureReadyToWork = async () => {
 };
 
 // --- Core Logic ---
-const processCheckBatch = async (consoleId) => {
-  // Logika batch kamu tetap sama...
-  const urls = await CheckService.listUrls(consoleId);
-  if (!urls.length) return false;
+const processCheckBatch = async (consoleId, batchLimit = 100) => {
+  // Ambil URL dalam jumlah banyak sekaligus (Problem Solver: Mengurangi Round-trip)
+  const urls = await CheckService.listUrls(consoleId, batchLimit);
 
-  const myLimiter = new RateLimiter(5);
+  if (!urls || urls.length === 0) return false;
+
+  console.log(`📦 Memproses batch sebesar: ${urls.length} data...`);
+
+  // Naikkan concurrency kalau internet kuat (KISS)
+  const concurrencyLevel = 10;
+  const myLimiter = new RateLimiter(concurrencyLevel);
+
   const checked = await CheckService.checkAllUrls(urls, {
-    concurrency: 5,
+    concurrency: concurrencyLevel,
     rateLimiter: myLimiter,
   });
 
-  await CheckService.insertDB(checked, { batchSize: 500 });
+  // Bulk insert sekaligus
+  await CheckService.insertDB(checked, { batchSize: batchLimit });
+
   return true;
 };
 
@@ -84,7 +92,7 @@ const runCheck = async (consoleId) => {
     await ensureReadyToWork(); // Gatekeeper (Internet + Time)
 
     try {
-      const hasMore = await processCheckBatch(consoleId);
+      const hasMore = await processCheckBatch(consoleId, 100);
 
       if (!hasMore) {
         console.log("✅ Beres! Semua data diproses. Resetting...");
