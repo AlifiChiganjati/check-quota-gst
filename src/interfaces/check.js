@@ -58,8 +58,8 @@ const processCheckBatch = async (consoleId, batchLimit = 100) => {
   console.log(`📦 Memproses batch sebesar: ${urls.length} data...`);
 
   // Naikkan concurrency kalau internet kuat (KISS)
-  const concurrencyLevel = 3;
-  const myLimiter = new RateLimiter(concurrencyLevel);
+  const concurrencyLevel = 10;
+  const myLimiter = new RateLimiter(5);
 
   const checked = await CheckService.checkAllUrls(urls, {
     concurrency: concurrencyLevel,
@@ -87,8 +87,8 @@ const runCheck = async (consoleId) => {
         await CheckService.resetStatusGstStuck(consoleId);
         await CheckService.resetStatusGst(consoleId);
 
-        console.log("🕒 Istirahat 5 menit dulu ya senpai... (/'3')/");
-        await delay(5 * 60 * 1000);
+        console.log("🕒 Istirahat 1 menit dulu ya senpai... (/'3')/");
+        await delay(1 * 60 * 1000);
       }
     } catch (err) {
       console.error("❌ Error:", err.message);
