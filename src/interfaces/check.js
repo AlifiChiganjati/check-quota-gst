@@ -1,7 +1,13 @@
-// ---------- interfaces/check.js (optimized runner) ----------
 import CheckService from "../services/check.service.js";
 import dns from "dns/promises";
 import RateLimiter from "../utils/rateLimiter.js";
+
+// --- Configuration ---
+const OPERATIONAL_START = 1; // 01:00
+const OPERATIONAL_END = 20; // 20:00
+
+// --- Helpers (KISS) ---
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const isInternetAvailable = async () => {
   try {
@@ -12,100 +18,87 @@ const isInternetAvailable = async () => {
   }
 };
 
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+const getStatus = () => {
+  const now = new Date();
+  const hour = now.getHours();
+  const isWorkingTime = hour >= OPERATIONAL_START && hour < OPERATIONAL_END;
 
-const processCheckBatch = async (consoleId) => {
-  console.log("Ambil URL dari DB...");
-  const urls = await CheckService.listUrls(consoleId);
-
-  if (!urls.length) {
-    console.log("✅ Semua data hari ini sudah di-log, proses selesai");
-    await CheckService.resetStatusGstStuck(consoleId);
-    return false;
+  // Hitung waktu tunggu sampai jam 1 pagi besok kalau sudah lewat jam 8 malam
+  let msUntilStart = 0;
+  if (!isWorkingTime) {
+    const nextStart = new Date();
+    if (hour >= OPERATIONAL_END) nextStart.setDate(nextStart.getDate() + 1);
+    nextStart.setHours(OPERATIONAL_START, 0, 0, 0);
+    msUntilStart = nextStart - now;
   }
 
-  console.log(`Cek ${urls.length} URL...`);
+  return { isWorkingTime, msUntilStart };
+};
+
+/**
+ * Guard function (DRY)
+ * Menangani pengecekan internet DAN jam operasional dalam satu pintu
+ */
+const ensureReadyToWork = async () => {
+  while (true) {
+    const { isWorkingTime, msUntilStart } = getStatus();
+
+    if (!isWorkingTime) {
+      console.log(
+        `😴 Di luar jam operasional. Tidur selama ${Math.round(msUntilStart / 60000)} menit...`,
+      );
+      await delay(msUntilStart);
+      continue; // Cek ulang setelah bangun
+    }
+
+    if (!(await isInternetAvailable())) {
+      console.log("⚠️ Internet mati, nunggu 5 detik... (>///<)");
+      await delay(5000);
+      continue;
+    }
+
+    break; // Semua oke, silakan kerja!
+  }
+};
+
+// --- Core Logic ---
+const processCheckBatch = async (consoleId) => {
+  // Logika batch kamu tetap sama...
+  const urls = await CheckService.listUrls(consoleId);
+  if (!urls.length) return false;
 
   const myLimiter = new RateLimiter(5);
   const checked = await CheckService.checkAllUrls(urls, {
     concurrency: 5,
-    rateLimiter: myLimiter, // <--- Kamu kirim mesinnya langsung!
+    rateLimiter: myLimiter,
   });
 
-  console.log("Insert hasil ke DB...");
   await CheckService.insertDB(checked, { batchSize: 500 });
-
-  console.log("Batch selesai ✅");
   return true;
 };
 
-const processCleanup = async (consoleId) => {
-  console.log("🔄 Jalankan proses cleanup...");
-
-  const resetStuck = await CheckService.resetStatusGst(consoleId);
-  const resetStuckCount = resetStuck?.affectedRows ?? 0;
-
-  console.log(`Reset stuck status=1 → 0: ${resetStuckCount}`);
-
-  // Ambil hasil reset error abnormal
-  const resetResult = await CheckService.resetAllErrorToZero(consoleId);
-  console.log(`🟡 Ditemukan error abnormal: ${resetResult.found}`);
-  console.log(`🟢 Berhasil reset status=3 → 0: ${resetResult.affectedRows}`);
-
-  console.log("Cleanup selesai ✅");
-};
-
-const check = async (consoleId) => {
-  console.log("🚀 Mulai proses check:", new Date().toLocaleString());
+const runCheck = async (consoleId) => {
+  console.log("🚀 Program dimulai...");
 
   while (true) {
-    let internet = await isInternetAvailable();
-    while (!internet) {
-      console.log("⚠️ Internet mati, menunggu 5 detik...");
-      await delay(5000);
-      internet = await isInternetAvailable();
-    }
+    await ensureReadyToWork(); // Gatekeeper (Internet + Time)
 
     try {
       const hasMore = await processCheckBatch(consoleId);
 
-      // ⛔ kondisi berhenti utama
       if (!hasMore) {
-        console.log("✅ Tidak ada data lagi, hentikan loop check");
-        break;
+        console.log("✅ Beres! Semua data diproses. Resetting...");
+        await CheckService.resetStatusGstStuck(consoleId);
+        await CheckService.resetStatusGst(consoleId);
+
+        console.log("🕒 Istirahat 15 menit dulu ya senpai... (/'3')/");
+        await delay(15 * 60 * 1000);
       }
     } catch (err) {
-      console.error("❌ Error saat step check/insert:", err);
-      console.error("Stack trace:", err?.stack);
+      console.error("❌ Error:", err.message);
       await delay(5000);
     }
   }
-
-  try {
-    await processCleanup(consoleId);
-  } catch (err) {
-    console.error("❌ Error saat cleanup", err);
-    console.error("Stack trace:", err?.stack);
-  }
-
-  console.log(
-    "🎯 Proses check semua data selesai:",
-    new Date().toLocaleString(),
-  );
-};
-
-const runCheck = async (consoleId) => {
-  let internet = await isInternetAvailable();
-  while (!internet) {
-    console.log("⚠️ Internet mati sebelum runCheck, menunggu 5 detik...");
-    await delay(5000);
-    internet = await isInternetAvailable();
-  }
-
-  await check(consoleId);
-
-  console.log("🕒 Tunggu 15 menit untuk run berikutnya...");
-  setTimeout(() => runCheck(consoleId), 15 * 60 * 1000);
 };
 
 export default runCheck;
