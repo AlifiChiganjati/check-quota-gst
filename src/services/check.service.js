@@ -266,17 +266,25 @@ export default class CheckService {
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const allIds = [...new Set(results.map((r) => r.id))];
+    if (allIds.length === 0) return;
+    const uniqueInput = [];
+    const seenInBatch = new Set();
+    for (const r of results) {
+      if (!seenInBatch.has(r.id)) {
+        uniqueInput.push(r);
+        seenInBatch.add(r.id);
+      }
+    }
     const lastRefsRows = await CheckRepository.getLastRefs(allIds, today);
     const refMap = new Map(
       lastRefsRows.map((r) => [r.check_quota_id, r.lastRef]),
     );
-    // 1. Transformasi Data (Computational Thinking: Flattening & Normalization)
-    const normalized = results.map((data) => {
+    const normalized = uniqueInput.map((data) => {
       const isErrorKind = data.kind === "FAILED";
       const statusPaket = data.statusPaket || "";
       const isFailed =
         isErrorKind || statusPaket.toLowerCase().startsWith("error");
-      // Kita buat object yang FLAT. Tidak ada lagi 'payload: {}' yang bikin bingung!
+
       const currentLastRef = refMap.get(data.id) || 0;
       const nextRef = currentLastRef + 1;
       refMap.set(data.id, nextRef); // Update map supaya kalau di batch ini ada ID sama lagi, ref-nya lanjut
@@ -305,60 +313,43 @@ export default class CheckService {
       };
     });
 
-    // 2. Filter Duplikat (Problem Solver: Data Integrity)
-    const uniqueResults = [];
-    const seenIds = new Set();
-
-    for (const item of normalized) {
-      if (!seenIds.has(item.id)) {
-        uniqueResults.push(item);
-        seenIds.add(item.id);
-      }
-    }
-
-    uniqueResults.sort((a, b) => a.id - b.id);
-    // 3. Bucket Sorting (Efficiency)
-    const successBuffer = [];
-    const errorBuffer = [];
-    const statusPairs = [];
-
-    for (const item of uniqueResults) {
-      statusPairs.push({ id: item.id, newStatus: item.newStatus });
-
-      // Karena object sudah FLAT, kita tinggal pisahkan berdasarkan status
-      if (item.isFailed) {
-        errorBuffer.push(item);
-      } else {
-        successBuffer.push(item);
-      }
-    }
-
+    // 5. Bucket Sorting
+    const successBuffer = normalized.filter((item) => !item.isFailed);
+    const errorBuffer = normalized.filter((item) => item.isFailed);
+    const statusPairs = normalized.map((item) => ({
+      id: item.id,
+      newStatus: item.newStatus,
+    }));
     // 4. Batch Execution (DRY Principle)
-    const runBatch = async (data, tableName) => {
-      for (let i = 0; i < data.length; i += BATCH_SIZE) {
-        const chunk = data.slice(i, i + BATCH_SIZE);
-        await CheckRepository.insertBulkLog(tableName, chunk);
-      }
-    };
+    // const runBatch = async (data, tableName) => {
+    //   for (let i = 0; i < data.length; i += BATCH_SIZE) {
+    //     const chunk = data.slice(i, i + BATCH_SIZE);
+    //     await CheckRepository.insertBulkLog(tableName, chunk);
+    //   }
+    // };
 
     try {
       // Jalankan semua bulk insert
-      if (successBuffer.length > 0) {
-        await runBatch(successBuffer, "gst_log_check_quota");
-      }
-
-      if (errorBuffer.length > 0) {
-        await runBatch(errorBuffer, "gst_log_check_quota_error");
-      }
-
-      // Update status master table
-      if (statusPairs.length > 0) {
+      if (successBuffer.length > 0)
+        await this.runBatch(successBuffer, "gst_log_check_quota", BATCH_SIZE);
+      if (errorBuffer.length > 0)
+        await this.runBatch(
+          errorBuffer,
+          "gst_log_check_quota_error",
+          BATCH_SIZE,
+        );
+      if (statusPairs.length > 0)
         await CheckRepository.bulkUpdateStatuses(statusPairs, BATCH_SIZE);
-      }
-      console.log("Berhasil! data di insert ke db(/'3')/");
+      console.log(`Berhasil insert ${normalized.length} data baru! (/'3')/`);
     } catch (err) {
       console.error("Duh, baka! Masih error di insertDB:", err.message);
       throw err;
+    }
+  }
+
+  static async runBatch(data, tableName, size) {
+    for (let i = 0; i < data.length; i += size) {
+      await CheckRepository.insertBulkLog(tableName, data.slice(i, i + size));
     }
   }
   // keep other methods as-is (updateStatus, resetStatusGst, listResetGst, resetStatusGstStuck)

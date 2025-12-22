@@ -84,16 +84,18 @@ VALUES ${placeholders} `;
   // Batch check existing rows for today for given ids
   static async getExistingLogs(checkQuotaIds, date) {
     if (!Array.isArray(checkQuotaIds) || checkQuotaIds.length === 0) return [];
+
+    // Kita cari log yang punya ref paling besar di hari ini untuk ID-ID tersebut
     const sql = `
-      SELECT DISTINCT check_quota_id
-      FROM gst_log_check_quota
-      WHERE date = ?
-      AND check_quota_id IN (?)
-    `;
+    SELECT check_quota_id, MAX(ref) as last_ref
+    FROM gst_log_check_quota
+    WHERE date = ?
+    AND check_quota_id IN (?)
+    GROUP BY check_quota_id
+  `;
     const [rows] = await db.query(sql, [date, checkQuotaIds]);
     return rows;
   }
-
   // Batch get lastRef per check_quota_id for date
   static async getLastRefs(checkQuotaIds, date) {
     if (!Array.isArray(checkQuotaIds) || checkQuotaIds.length === 0) return [];
