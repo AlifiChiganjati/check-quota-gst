@@ -53,7 +53,10 @@ const processCheckBatch = async (consoleId, batchLimit = 100) => {
   // Ambil URL dalam jumlah banyak sekaligus (Problem Solver: Mengurangi Round-trip)
   const urls = await CheckService.listUrls(consoleId, batchLimit);
 
-  if (!urls || urls.length === 0) return false;
+  if (!urls || urls.length === 0) {
+    await CheckService.resetAllErrorToZero(consoleId);
+    return false;
+  }
 
   console.log(`📦 Memproses batch sebesar: ${urls.length} data...`);
 
