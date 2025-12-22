@@ -71,7 +71,7 @@ const processCheckBatch = async (consoleId, batchLimit = 100) => {
   console.log(`📦 Memproses batch sebesar: ${urls.length} data...`);
 
   // Naikkan concurrency kalau internet kuat (KISS)
-  const concurrencyLevel = 10;
+  const concurrencyLevel = 5;
   const myLimiter = new RateLimiter(concurrencyLevel);
 
   const checked = await CheckService.checkAllUrls(urls, {
@@ -81,13 +81,14 @@ const processCheckBatch = async (consoleId, batchLimit = 100) => {
 
   // Bulk insert sekaligus
   await CheckService.insertDB(checked, { batchSize: batchLimit });
+  await delay(Math.random() * 5000);
 
   return true;
 };
 
 const runCheck = async (consoleId) => {
   console.log("🚀 Program dimulai...");
-
+  await delay(Math.random() * 30000);
   while (true) {
     await ensureReadyToWork(); // Gatekeeper (Internet + Time)
 
