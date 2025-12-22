@@ -3,7 +3,7 @@ import RateLimiter from "../utils/rateLimiter.js";
 import { delay, isInternetAvailable } from "../utils/helper.js";
 // --- Configuration ---
 const OPERATIONAL_START = 1; // 01:00
-const OPERATIONAL_END = 12; // 20:00
+const OPERATIONAL_END = 24; // 20:00
 
 const getStatus = () => {
   const now = new Date();
@@ -58,8 +58,8 @@ const processCheckBatch = async (consoleId, batchLimit = 100) => {
   console.log(`📦 Memproses batch sebesar: ${urls.length} data...`);
 
   // Naikkan concurrency kalau internet kuat (KISS)
-  const concurrencyLevel = 10;
-  const myLimiter = new RateLimiter(5);
+  const concurrencyLevel = 5;
+  const myLimiter = new RateLimiter(concurrencyLevel);
 
   const checked = await CheckService.checkAllUrls(urls, {
     concurrency: concurrencyLevel,
@@ -68,19 +68,19 @@ const processCheckBatch = async (consoleId, batchLimit = 100) => {
 
   // Bulk insert sekaligus
   await CheckService.insertDB(checked, { batchSize: batchLimit });
-  await delay(Math.random() * 5000);
+  await delay(Math.random() * 1000);
 
   return true;
 };
 
 const runCheck = async (consoleId) => {
   console.log("🚀 Program dimulai...");
-  await delay(Math.random() * 30000);
+  await delay(Math.random() * 10000);
   while (true) {
     await ensureReadyToWork(); // Gatekeeper (Internet + Time)
 
     try {
-      const hasMore = await processCheckBatch(consoleId, 50);
+      const hasMore = await processCheckBatch(consoleId, 100);
 
       if (!hasMore) {
         console.log("✅ Beres! Semua data diproses. Resetting...");
