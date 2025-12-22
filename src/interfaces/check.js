@@ -91,8 +91,8 @@ const runCheck = async (consoleId) => {
         await CheckService.resetStatusGstStuck(consoleId);
         await CheckService.resetStatusGst(consoleId);
 
-        console.log("🕒 Istirahat 15 menit dulu ya senpai... (/'3')/");
-        await delay(15 * 60 * 1000);
+        console.log("🕒 Istirahat 5 menit dulu ya senpai... (/'3')/");
+        await delay(5 * 60 * 1000);
       }
     } catch (err) {
       console.error("❌ Error:", err.message);
