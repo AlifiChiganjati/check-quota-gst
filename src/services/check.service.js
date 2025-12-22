@@ -305,11 +305,10 @@ export default class CheckService {
       if (!seenIds.has(item.id)) {
         uniqueResults.push(item);
         seenIds.add(item.id);
-      } else {
-        console.log(`Baka! ID ${item.id} duplikat, aku buang ya! (>///<)`);
       }
     }
 
+    uniqueResults.sort((a, b) => a.id - b.id);
     // 3. Bucket Sorting (Efficiency)
     const successBuffer = [];
     const errorBuffer = [];

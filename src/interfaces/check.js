@@ -26,14 +26,14 @@ const processCheckBatch = async (consoleId) => {
 
   console.log(`Cek ${urls.length} URL...`);
 
-  const myLimiter = new RateLimiter(10);
+  const myLimiter = new RateLimiter(5);
   const checked = await CheckService.checkAllUrls(urls, {
-    concurrency: 15,
+    concurrency: 5,
     rateLimiter: myLimiter, // <--- Kamu kirim mesinnya langsung!
   });
 
   console.log("Insert hasil ke DB...");
-  await CheckService.insertDB(checked, { batchSize: 1000 });
+  await CheckService.insertDB(checked, { batchSize: 500 });
 
   console.log("Batch selesai ✅");
   return true;

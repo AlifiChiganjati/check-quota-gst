@@ -80,13 +80,13 @@ export default class CheckRepository {
     INSERT INTO ${tableName} (${cols.join(",")}) 
     VALUES ${placeholders} 
     ON DUPLICATE KEY UPDATE 
-      raw_html=VALUES(raw_html),
-      ref = ref + 1, 
+      raw_html = VALUES(raw_html),
       msisdn = VALUES(msisdn),
       date_check = VALUES(date_check),
       value_check = VALUES(value_check),
-      status_paket = VALUES(status_paket)
-  `;
+      status_paket = VALUES(status_paket),
+      ref = ref + 1 
+`;
 
     const values = [];
     for (const row of batch) {
@@ -209,35 +209,30 @@ export default class CheckRepository {
   static async bulkUpdateStatuses(pairs, batchSize = 500) {
     if (!Array.isArray(pairs) || pairs.length === 0) return null;
 
-    // Kita bagi pairs menjadi chunk kecil
+    // Tambahan safety: Sort lagi di sini buat jaga-jaga kalau servicenya lupa!
+    pairs.sort((a, b) => a.id - b.id);
+
     for (let i = 0; i < pairs.length; i += batchSize) {
       const chunk = pairs.slice(i, i + batchSize);
       const ids = chunk.map((p) => p.id);
+
+      // SQL IN (?) butuh array IDs yang juga terurut sesuai CASE
       const cases = chunk
         .map((p) => `WHEN ${p.id} THEN ${p.newStatus}`)
         .join(" ");
 
       const sql = `
-      UPDATE gst_check_quota
-      SET status = CASE id
-        ${cases}
-        ELSE status
-      END
-      WHERE id IN (?)
-    `;
+        UPDATE gst_check_quota
+        SET status = CASE id
+          ${cases}
+          ELSE status
+        END
+        WHERE id IN (?)
+      `;
 
       await db.query(sql, [ids]);
     }
     return { success: true };
-  }
-  static async getLastRef(check_quota_id, date) {
-    const [rows] = await db.query(
-      `SELECT COALESCE(MAX(ref), 0) AS lastRef 
-     FROM gst_log_check_quota 
-     WHERE check_quota_id = ? AND date = ?`,
-      [check_quota_id, date],
-    );
-    return rows[0]?.lastRef || 0;
   }
 
   static async getAllGstError(consoleId) {
