@@ -167,7 +167,7 @@ export default class CheckService {
       urls.map(({ id, url_check, sn, msisdn }) =>
         limit(async () => {
           try {
-            await delay(Math.random() * 300);
+            await delay(Math.random() * 500);
             const parsed = await parsePage({ url: url_check, rateLimiter });
             // 1. Guard Clause: Identitas Wajib Ada
             if (
