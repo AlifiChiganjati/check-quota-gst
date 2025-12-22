@@ -101,9 +101,10 @@ async function parsePage({ url, rateLimiter }) {
   const $ = cheerio.load(cleanHtml(res.data)); // <-- Sanitasi di sini!
   const rawHtml = res.data;
   const findSection = (title) =>
-    $(".info-item").filter((_, el) =>
-      new RegExp(`^${title}$`, "i").test($(el).find(".title").text().trim()),
-    );
+    $(".info-item").filter((_, el) => {
+      const currentTitle = normalizeText($(el).find(".title").text());
+      return currentTitle.toLowerCase() === title.toLowerCase();
+    });
 
   // Identitas
   const serialNumber =
@@ -123,8 +124,8 @@ async function parsePage({ url, rateLimiter }) {
   const mtpResult = parseAndValidateDate(rawMasaTunggu);
   const masaTungguSection = findSection("Masa Tunggu Kartu");
   const masaTunggu = {
-    tanggal: masaTungguSection.find(".date").text().trim() || null,
-    status: masaTungguSection.find(".date-desc").text().trim() || null,
+    tanggal: normalizeText(masaTungguSection.find(".date").text()) || null,
+    status: normalizeText(masaTungguSection.find(".date-desc").text()) || null,
   };
   // Pending Paket
   const pendingSection = findSection("Pending Paket");
