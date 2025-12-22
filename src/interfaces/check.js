@@ -3,7 +3,7 @@ import RateLimiter from "../utils/rateLimiter.js";
 import { delay, isInternetAvailable } from "../utils/helper.js";
 // --- Configuration ---
 const OPERATIONAL_START = 1; // 01:00
-const OPERATIONAL_END = 24; // 20:00
+const OPERATIONAL_END = 12; // 20:00
 
 const getStatus = () => {
   const now = new Date();
