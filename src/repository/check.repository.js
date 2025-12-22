@@ -53,87 +53,12 @@ export default class CheckRepository {
     }
   }
 
-  static async insertError(data) {
-    const {
-      sn,
-      msisdn,
-      masa_tunggu_kartu,
-      value_check,
-      date_check,
-      status,
-      status_paket,
-      kuota,
-      check_quota_id,
-      date,
-      ref = 1,
-    } = data;
-
-    const sql = `
-  INSERT INTO gst_log_check_quota_error
-  (sn, msisdn, masa_tunggu_kartu, value_check, date_check, status, status_paket, kuota, check_quota_id, date, ref)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`;
-
-    const values = [
-      sn,
-      msisdn,
-      masa_tunggu_kartu,
-      JSON.stringify(value_check),
-      date_check,
-      status,
-      status_paket,
-      kuota,
-      check_quota_id,
-      date,
-      ref,
-    ];
-
-    return await db.execute(sql, values);
-  }
-
-  static async insertSuccess(data) {
-    const {
-      sn,
-      msisdn,
-      masa_tunggu_kartu,
-      value_check,
-      date_check,
-      status,
-      status_paket,
-      kuota,
-      check_quota_id,
-      date,
-      ref = 1,
-    } = data;
-
-    const sql = `
-  INSERT INTO gst_log_check_quota
-  (sn, msisdn, masa_tunggu_kartu, value_check, date_check, status, status_paket, kuota, check_quota_id, date, ref)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`;
-
-    const values = [
-      sn,
-      msisdn,
-      masa_tunggu_kartu,
-      JSON.stringify(value_check),
-      date_check,
-      status,
-      status_paket,
-      kuota,
-      check_quota_id,
-      date,
-      ref,
-    ];
-
-    return await db.execute(sql, values);
-  }
-
   // repository/check.repository.js
   static async insertBulkLog(tableName, batch) {
     if (!Array.isArray(batch) || batch.length === 0) return null;
 
     const cols = [
+      "raw_html",
       "sn",
       "msisdn",
       "masa_tunggu_kartu",
@@ -155,6 +80,7 @@ export default class CheckRepository {
     INSERT INTO ${tableName} (${cols.join(",")}) 
     VALUES ${placeholders} 
     ON DUPLICATE KEY UPDATE 
+      raw_html=VALUES(raw_html),
       ref = ref + 1, 
       msisdn = VALUES(msisdn),
       date_check = VALUES(date_check),
@@ -166,6 +92,7 @@ export default class CheckRepository {
     for (const row of batch) {
       // Pastikan mapping di sini konsisten dengan array 'cols' di atas!
       values.push(
+        row.raw_html || null,
         row.sn || null,
         row.msisdn || null, // Sekarang ini aman karena data sudah di-flatten di service
         row.masa_tunggu_kartu || null,
@@ -178,7 +105,7 @@ export default class CheckRepository {
         row.kuota || "0",
         row.check_quota_id,
         row.date,
-        row.ref || 1,
+        1,
       );
     }
 

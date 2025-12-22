@@ -1,9 +1,9 @@
 //service
 import CheckRepository from "../repository/check.repository.js";
 import * as cheerio from "cheerio";
-import { normalize } from "../utils/normalize.js";
 import pLimit from "p-limit";
 import { httpClient } from "../utils/httpClient.js";
+import RateLimiter from "../utils/rateLimiter.js";
 
 /* =========================
  * CONSTANTS (NEW)
@@ -11,84 +11,6 @@ import { httpClient } from "../utils/httpClient.js";
 const VALID_YEAR_MIN = 2025;
 const VALID_YEAR_MAX = 2040;
 
-/* =========================
- * RATE LIMITER (UNCHANGED)
- * ========================= */
-class RateLimiter {
-  constructor(permitsPerSecond = 30) {
-    this.permitsPerSecond = permitsPerSecond;
-    this.tokens = permitsPerSecond;
-    this.lastRefill = Date.now();
-  }
-
-  _refill() {
-    const now = Date.now();
-    const elapsed = now - this.lastRefill;
-    if (elapsed > 0) {
-      const add = (elapsed / 1000) * this.permitsPerSecond;
-      this.tokens = Math.min(this.permitsPerSecond, this.tokens + add);
-      this.lastRefill = now;
-    }
-  }
-
-  async removeToken() {
-    while (true) {
-      this._refill();
-      if (this.tokens >= 1) {
-        this.tokens -= 1;
-        return;
-      }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-}
-function isValidTextValue(val) {
-  if (!val) return false;
-
-  const text = String(val).trim();
-  if (!text) return false;
-
-  const lowered = text.toLowerCase();
-  if (lowered === "-" || lowered === "n/a" || lowered === "null") return false;
-
-  // =========================
-  // DATE-AWARE VALIDATION
-  // =========================
-
-  // Deteksi kandidat tanggal: ada tahun 4 digit
-  const looksLikeDate = /\b\d{4}\b/.test(text);
-
-  if (looksLikeDate) {
-    const parsed = parseDate(text);
-
-    // ❌ format salah
-    if (!parsed || isNaN(parsed.getTime())) return false;
-
-    // ❌ tahun ngaco
-    const year = parsed.getFullYear();
-    if (year < VALID_YEAR_MIN || year > VALID_YEAR_MAX) return false;
-
-    // ❌ jam / menit / detik ngaco
-    const hasTime = /(\d{2}):(\d{2})(?::(\d{2}))?/.test(text);
-    if (hasTime) {
-      const [, hh, mm, ss = "0"] =
-        text.match(/(\d{2}):(\d{2})(?::(\d{2}))?/) || [];
-
-      if (Number(hh) > 23 || Number(mm) > 59 || Number(ss) > 59) {
-        return false;
-      }
-    }
-  }
-
-  // =========================
-  // PASSED ALL CHECKS
-  // =========================
-  return true;
-}
-
-/* =========================
- * DATE HELPERS (FIXED)
- * ========================= */
 const monthMap = {
   Jan: 0,
   Feb: 1,
@@ -104,221 +26,128 @@ const monthMap = {
   Dec: 11,
 };
 
-const dateRegex =
-  /(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/;
+const cleanHtml = (rawHtml) => {
+  if (!rawHtml) return "";
+  const parts = rawHtml.split("<!DOCTYPE");
+  return "<!DOCTYPE" + parts[parts.length - 1];
+};
 
-function parseDate(text) {
-  if (!text) return null;
-  const m = text.match(dateRegex);
-  if (!m) return null;
-
-  const [, d, mon, y, h = 0, mi = 0, s = 0] = m;
-  const month = monthMap[mon];
-  if (month === undefined) return null;
-
-  return new Date(+y, month, +d, +h, +mi, +s);
-}
-
-function isValidYear(date) {
-  if (!date) return false;
-  const y = date.getFullYear();
-  return y >= VALID_YEAR_MIN && y <= VALID_YEAR_MAX;
-}
-
-function formatDate(date) {
-  if (!date) return "";
-  const day = String(date.getDate()).padStart(2, "0");
-  const mon = Object.keys(monthMap).find(
-    (k) => monthMap[k] === date.getMonth(),
-  );
-  return `${day} ${mon} ${date.getFullYear()} ${String(
-    date.getHours(),
-  ).padStart(2, "0")}:${String(date.getMinutes()).padStart(
-    2,
-    "0",
-  )}:${String(date.getSeconds()).padStart(2, "0")}`;
-}
-
-function cleanBrokenDate(text) {
-  if (!text) return "";
-  const m = text.match(/(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})/);
-  return m ? m[1] : text.trim();
-}
-function validateParsedDate(date, rawText) {
-  if (!date || !(date instanceof Date)) return false;
-  if (isNaN(date.getTime())) return false;
-
-  // wajib ada tahun 4 digit di text
-  if (!/\b\d{4}\b/.test(rawText)) return false;
-
-  const year = date.getFullYear();
-
-  if (year < VALID_YEAR_MIN || year > VALID_YEAR_MAX) {
-    return false;
-  }
-
-  return true;
-}
-
-function extractMasaTungguPaket($) {
-  const $container = $(".info-item:has(.title:contains('Value'))").length
-    ? $(".info-item:has(.title:contains('Value'))")
-    : $("tbody");
-
-  let text = getValueRow($, $container, "Masa Tunggu Paket");
-
-  const parsed = parseDate(text);
-
-  if (validateParsedDate(parsed, text)) {
-    return { text, parsed, valid: true };
-  }
-
-  // fallback
-  const fallbackText = normalizeText(
-    $(".other-title:contains('Masa Tunggu Paket')").next(".other-value").text(),
-  );
-
-  const fallbackParsed = parseDate(fallbackText);
-
-  if (validateParsedDate(fallbackParsed, fallbackText)) {
-    return { text: fallbackText, parsed: fallbackParsed, valid: true };
-  }
-
-  return {
-    text,
-    parsed,
-    valid: false,
-  };
-}
-
-/* =========================
- * DOM HELPERS
- * ========================= */
-function normalizeText(txt) {
-  return (txt || "")
+const normalizeText = (txt) =>
+  (txt || "")
     .replace(/\u00A0/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
 
-// function getValueRow($container, title) {
-//   let foundText = "";
-//   $container.find("tr").each((_, el) => {
-//     const titleTd = normalizeText(
-//       cheerio.load(el)("td.other-title").text(),
-//     ).toLowerCase();
-//
-//     if (titleTd.includes(title.toLowerCase())) {
-//       foundText = normalizeText(cheerio.load(el)("td.other-value").text());
-//       return false;
-//     }
-//   });
-//   return foundText;
-// }
-function getValueRow($, $container, title) {
-  let foundText = "";
+const getStrictRowValue = ($, container, targetTitle) => {
+  let foundValue = "";
+  const target = targetTitle.toLowerCase().trim();
 
-  $container.find("tr").each((_, el) => {
-    const $el = $(el);
+  $(container)
+    .find("tr")
+    .each((_, el) => {
+      const currentTitle = normalizeText(
+        $(el).find(".other-title").text(),
+      ).toLowerCase();
+      if (currentTitle === target) {
+        foundValue = normalizeText($(el).find(".other-value").text());
+        return false; // Break
+      }
+    });
+  return foundValue;
+};
 
-    const titleTd = normalizeText(
-      $el.find("td.other-title").text(),
-    ).toLowerCase();
+const parseAndValidateDate = (dateStr) => {
+  if (!dateStr) return { valid: false, parsed: null };
 
-    if (titleTd.includes(title.toLowerCase())) {
-      foundText = normalizeText($el.find("td.other-value").text());
-      return false; // break
-    }
-  });
+  // Regex Baru: Nangkep Tanggal DAN Jam (Opsional)
+  // ^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{2}:\d{2}:\d{2}))?
+  const dateRegex =
+    /^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{2}:\d{2}:\d{2}))?/;
+  const m = dateStr.match(dateRegex);
 
-  return foundText;
-}
+  if (!m) return { valid: false, parsed: null };
 
-/* =========================
- * FETCH (SINGLE SOURCE)
- * ========================= */
-async function fetchHtml(url, rateLimiter) {
-  await rateLimiter.removeToken();
-  const res = await httpClient.get(url);
-  return res.data;
-}
+  const [, d, mon, y, time = "00:00:00"] = m; // Fallback ke 00:00:00 kalau jam gak ada
+  const month = monthMap[mon];
 
+  if (month === undefined) return { valid: false, parsed: null };
+
+  // Buat objek Date lengkap dengan jamnya
+  const [hh, mm, ss] = time.split(":");
+  const dateObj = new Date(+y, month, +d, +hh, +mm, +ss);
+  const year = dateObj.getFullYear();
+
+  if (
+    isNaN(dateObj.getTime()) ||
+    year < VALID_YEAR_MIN ||
+    year > VALID_YEAR_MAX
+  ) {
+    return { valid: false, parsed: null };
+  }
+
+  // Balikin text lengkap (Tanggal + Jam)
+  return {
+    valid: true,
+    parsed: dateObj,
+    text: `${d} ${mon} ${y} ${time}`.trim(),
+  };
+};
 /* =========================
  * REFACTORED PAGE PARSER
  * ========================= */
 async function parsePage({ url, rateLimiter }) {
-  const html = await fetchHtml(url, rateLimiter);
-  const $ = cheerio.load(html);
-
-  // Pakai Regex agar "Number" tidak nyangkut di "Serial Number"
-  // ^ artinya awal string, $ artinya akhir string (STRICT MATCH)
-  const findInfoItemByTitle = (title) => {
-    return $(".info-item").filter((_, el) => {
-      const headerText = $(el).find(".title").text().trim();
-      // Case insensitive match yang strict (Exact Match)
-      const regex = new RegExp(`^${title}$`, "i");
-      return regex.test(headerText);
-    });
-  };
-
-  const serialNumber =
-    findInfoItemByTitle("Serial Number").find(".single-value").text().trim() ||
-    null;
-
-  const phoneNumber =
-    $(".info-item")
-      .toArray()
-      .map((el) => ({
-        title: $(el).find(".title").text().trim(),
-        value: $(el).find(".single-value").text().trim(),
-      }))
-      .find((item) => item.title.toLowerCase() === "number")?.value || null;
-
-  // 2. Ambil Masa Tunggu Kartu
-  const masaTungguItem = findInfoItemByTitle("Masa Tunggu Kartu");
-  const masaTunggu = {
-    tanggal: masaTungguItem.find(".date").text().trim(),
-    status: masaTungguItem.find(".date-desc").text().trim(),
-  };
-
-  // 3. Ambil Pending Paket
-  const pendingItem = findInfoItemByTitle("Pending Paket");
-  let pending = { kuota: "", redeem: "" };
-  if (pendingItem.length > 0) {
-    pending.kuota = getValueRow($, pendingItem, "Kuota");
-    pending.redeem = cleanBrokenDate(
-      getValueRow($, pendingItem, "Dapat di redeem hingga"),
+  await rateLimiter.removeToken();
+  const res = await httpClient.get(url);
+  const $ = cheerio.load(cleanHtml(res.data)); // <-- Sanitasi di sini!
+  const rawHtml = res.data;
+  const findSection = (title) =>
+    $(".info-item").filter((_, el) =>
+      new RegExp(`^${title}$`, "i").test($(el).find(".title").text().trim()),
     );
-  }
 
-  // 4. Ambil Value Section
-  let valueItem = findInfoItemByTitle("Value");
-  if (valueItem.length === 0) valueItem = $("tbody");
-
-  const masaWaktu = getValueRow($, valueItem, "Masa Waktu");
-  const kuotaNasional = getValueRow($, valueItem, "Kuota Nasional");
-  const kuotaLokal = getValueRow($, valueItem, "Kuota Lokal");
-  const lainnya = getValueRow($, valueItem, "Lainnya");
-
-  // 5. Masa Tunggu Paket (Pake logika extract yang sudah ada tapi pastikan dipanggil bener)
-  const parsedMasaTunggu = extractMasaTungguPaket($);
+  // Identitas
+  const serialNumber =
+    findSection("Serial Number").find(".single-value").text().trim() || null;
+  const phoneNumber =
+    findSection("Number").find(".single-value").text().trim() || null;
   const pageError = $("p").first().text().trim() || null;
-  // console.log(masaTungguItem);
+
+  // Value Section
+  const valueSection = findSection("Value").length
+    ? findSection("Value")
+    : $("tbody");
+  const masaWaktu = getStrictRowValue($, valueSection, "Masa Waktu");
+
+  // Masa Tunggu Paket (Parsing Strict)
+  const rawMasaTunggu = getStrictRowValue($, valueSection, "Masa Tunggu Paket");
+  const mtpResult = parseAndValidateDate(rawMasaTunggu);
+  const masaTungguSection = findSection("Masa Tunggu Kartu");
+  const masaTunggu = {
+    tanggal: masaTungguSection.find(".date").text().trim() || null,
+    status: masaTungguSection.find(".date-desc").text().trim() || null,
+  };
+  // Pending Paket
+  const pendingSection = findSection("Pending Paket");
+  const pending = {
+    kuota: getStrictRowValue($, pendingSection, "Kuota"),
+    redeem: parseAndValidateDate(
+      getStrictRowValue($, pendingSection, "Dapat di redeem hingga"),
+    ),
+  };
+
   return {
+    rawHtml,
     serialNumber,
     phoneNumber,
-    masaTunggu, // <--- SEKARANG GAK AKAN KOSONG LAGI!
-    masaWaktu,
-    kuotaNasional,
-    kuotaLokal,
-    lainnya,
-    masaTungguPaket: parsedMasaTunggu.valid
-      ? formatDate(parsedMasaTunggu.parsed)
-      : "",
-    masaTungguPaketValid: parsedMasaTunggu.valid,
-    statusPaket: masaWaktu && parsedMasaTunggu.valid ? "Value" : "",
-    pending,
     pageError,
+    masaTunggu,
+    masaWaktu,
+    kuotaNasional: getStrictRowValue($, valueSection, "Kuota Nasional"),
+    kuotaLokal: getStrictRowValue($, valueSection, "Kuota Lokal"),
+    lainnya: getStrictRowValue($, valueSection, "Lainnya"),
+    masaTungguPaket: mtpResult.valid ? mtpResult.text : "",
+    masaTungguPaketValid: mtpResult.valid,
+    pending,
   };
 }
 
@@ -330,122 +159,71 @@ export default class CheckService {
     return await CheckRepository.getAllUrl(consoleId, limit);
   }
   static async checkAllUrls(urls, opts = {}) {
-    const concurrency = opts.concurrency ?? 50;
-    const rateLimiter = opts.rateLimiter ?? new RateLimiter(opts.rps ?? 30);
-    const limit = pLimit(concurrency);
-
-    const parseGB = (val) => {
-      if (!val) return 0;
-      const m = String(val).match(/(\d+(\.\d+)?)/);
-      return m ? Number(m[1]) : 0;
-    };
+    const limit = pLimit(opts.concurrency ?? 10);
+    const rateLimiter = opts.rateLimiter || new RateLimiter(opts.rps ?? 30);
 
     return Promise.all(
       urls.map(({ id, url_check, sn, msisdn }) =>
         limit(async () => {
           try {
             const parsed = await parsePage({ url: url_check, rateLimiter });
-            // 1. PRIORITAS PALING TINGGI: Validasi Halaman & Data Identitas
-            // Kalau ini kena, langsung stop, jangan cek kuota atau pending lagi!
+            // 1. Guard Clause: Identitas Wajib Ada
             if (
               !parsed.serialNumber ||
               !parsed.phoneNumber ||
               parsed.pageError
             ) {
-              const errorMsg =
-                parsed.pageError || "SN and MSISDN Tidak ditemukan";
               return {
                 kind: "FAILED",
                 id,
+                rawHtml: parsed.rawHtml,
                 sn,
                 msisdn,
-                url: url_check,
-                serialNumber: parsed.serialNumber ?? null,
-                phoneNumber: parsed.phoneNumber ?? null,
-                masaTunggu: parsed.masaTunggu,
-                statusPaket: `Error: ${errorMsg}`,
-                value: { message: errorMsg },
-                kuota: "0",
+                statusPaket: `Error: ${parsed.pageError || "Data Incomplete"}`,
               };
             }
 
-            // 2. HITUNG KUOTA (Hanya dilakukan jika data identitas valid)
-            const sisaKuota =
-              parseGB(parsed.kuotaNasional) +
-              parseGB(parsed.kuotaLokal) +
-              parseGB(parsed.lainnya);
-
-            // 3. PRIORITAS KEDUA: PENDING MODE (Tapi harus valid isinya!)
-            const kuotaPending = parsed.pending?.kuota;
-            let redeemPendingRaw = parsed.pending?.redeem;
-            const redeemParsed = parseDate(redeemPendingRaw);
-
-            // Kita hanya masuk "Pending Paket" kalau kuotanya ada DAN tanggalnya masuk akal
-            if (
-              isValidTextValue(kuotaPending) &&
-              validateParsedDate(redeemParsed, redeemPendingRaw)
-            ) {
+            // 2. Logic: Pending Paket
+            if (parsed.pending.kuota && parsed.pending.redeem.valid) {
               return {
                 kind: "SUCCESS",
                 id,
+                rawHtml: parsed.rawHtml,
+                phoneNumber: parsed.phoneNumber,
+                serialNumber: parsed.serialNumber,
                 sn,
                 msisdn,
-                url: url_check,
-                serialNumber: parsed.serialNumber,
-                phoneNumber: parsed.phoneNumber,
-                masaTunggu: parsed.masaTunggu,
+                masaWaktu: parsed.masaTunggu,
                 statusPaket: "Pending Paket",
                 value: {
-                  kuota_pending: kuotaPending,
-                  redeem_pending: formatDate(redeemParsed),
+                  kuota_pending: parsed.pending.kuota,
+                  redeem_pending: parsed.pending.redeem.text,
                 },
-                kuota: "0",
-              };
-            }
-            // 4.a HARD FAIL: Masa Tunggu Paket ADA tapi FORMAT INVALID
-            if (
-              parsed.masaWaktu &&
-              isValidTextValue(parsed.masaWaktu) &&
-              parsed.masaTungguPaket &&
-              parsed.masaTungguPaketValid === false
-            ) {
-              return {
-                kind: "FAILED",
-                id,
-                sn,
-                msisdn,
-                url: url_check,
-                serialNumber: parsed.serialNumber,
-                phoneNumber: parsed.phoneNumber,
-                masaTunggu: parsed.masaTunggu,
-                statusPaket: "FAILED: Invalid Masa Tunggu Paket",
-                value: {
-                  message: "Format Masa Tunggu Paket tidak valid",
-                  raw: parsed.masaTungguPaket,
-                },
-                kuota: "0",
               };
             }
 
-            // 5. PRIORITAS KETIGA: VALUE MODE (PAKET AKTIF)
-            // Kita kunci: Kalau ada masaWaktu, WAJIB valid masaTungguPaket-nya.
-            // Sisa kuota > 0 tetap dianggap valid sebagai fallback.
-            const hasMeaningfulValue =
-              (isValidTextValue(parsed.masaWaktu) &&
-                parsed.masaTungguPaketValid === true) ||
-              sisaKuota > 0;
+            // 3. Logic: Active Value (YAGNI: Hanya sukses jika MTP valid)
+            if (parsed.masaWaktu && parsed.masaTungguPaketValid) {
+              const total = (val) => {
+                const m = String(val).match(/(\d+(\.\d+)?)/);
+                return m ? Number(m[1]) : 0;
+              };
+              const sisa =
+                total(parsed.kuotaNasional) +
+                total(parsed.kuotaLokal) +
+                total(parsed.lainnya);
 
-            if (hasMeaningfulValue) {
               return {
                 kind: "SUCCESS",
                 id,
+                rawHtml: parsed.rawHtml,
+                phoneNumber: parsed.phoneNumber,
+                serialNumber: parsed.serialNumber,
                 sn,
                 msisdn,
-                url: url_check,
-                serialNumber: parsed.serialNumber,
-                phoneNumber: parsed.phoneNumber,
                 masaTunggu: parsed.masaTunggu,
                 statusPaket: "Value",
+                kuota: `${sisa}`,
                 value: {
                   masa_waktu: parsed.masaWaktu,
                   kuota_nasional: parsed.kuotaNasional,
@@ -453,44 +231,32 @@ export default class CheckService {
                   kuota_lainnya: parsed.lainnya,
                   masa_tunggu_paket: parsed.masaTungguPaket,
                 },
-                kuota: `${sisaKuota}`,
               };
             }
-            // 6. FALLBACK TERAKHIR: Kalau semua di atas gagal
-            // Berarti halaman kebuka, SN ada, tapi nggak ada paket aktif maupun pending yang valid
+
+            // 4. Default Fail
             return {
               kind: "FAILED",
               id,
+              rawHtml: parsed.rawHtml,
               sn,
               msisdn,
-              url: url_check,
-              serialNumber: parsed.serialNumber,
-              phoneNumber: parsed.phoneNumber,
-              masaTunggu: parsed.masaTunggu,
-              statusPaket: parsed.statusPaket || "Error: Paket tidak ditemukan",
-              value: {
-                message: "Data paket tidak lengkap dan akan di check ulang",
-              },
-              kuota: "0",
+              statusPaket: "Data Paket Invalid/Incomplete",
             };
           } catch (err) {
-            // ❗ ERROR TEKNIS (Network/Code Crash)
             return {
               kind: "FAILED",
               id,
+              rawHtml: parsed.rawHtml,
               sn,
               msisdn,
-              url: url_check,
-              statusPaket: `Error`,
-              value: { message: err.message },
-              kuota: "0",
+              statusPaket: "Network/System Error",
             };
           }
         }),
       ),
     );
   }
-
   // ----------------------------
   // insertDB: optimized batch path
   // ----------------------------
@@ -511,6 +277,7 @@ export default class CheckService {
         id: data.id,
         isFailed: isFailed,
         newStatus: isFailed ? 2 : 4,
+        raw_html: data.rawHtml,
         sn: data.serialNumber || data.sn,
         msisdn:
           data.phoneNumber && data.phoneNumber.length > 5
@@ -518,8 +285,8 @@ export default class CheckService {
             : data.msisdn !== data.sn
               ? data.msisdn
               : null,
-        masa_tunggu_kartu: normalize(data.masaTunggu?.tanggal, null),
-        status: normalize(data.masaTunggu?.status, null),
+        masa_tunggu_kartu: data.masaTunggu?.tanggal || null,
+        status: data.masaTunggu?.status || null,
         status_paket: statusPaket,
         kuota: data.kuota || "0",
         check_quota_id: data.id,

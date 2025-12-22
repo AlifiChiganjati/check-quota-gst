@@ -1,6 +1,7 @@
 // ---------- interfaces/check.js (optimized runner) ----------
 import CheckService from "../services/check.service.js";
 import dns from "dns/promises";
+import RateLimiter from "../utils/rateLimiter.js";
 
 const isInternetAvailable = async () => {
   try {
@@ -25,10 +26,10 @@ const processCheckBatch = async (consoleId) => {
 
   console.log(`Cek ${urls.length} URL...`);
 
-  // pass optimized options: higher concurrency + tuned rps
+  const myLimiter = new RateLimiter(10);
   const checked = await CheckService.checkAllUrls(urls, {
     concurrency: 15,
-    rps: 10,
+    rateLimiter: myLimiter, // <--- Kamu kirim mesinnya langsung!
   });
 
   console.log("Insert hasil ke DB...");
