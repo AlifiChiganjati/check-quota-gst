@@ -80,7 +80,7 @@ const runCheck = async (consoleId) => {
     await ensureReadyToWork(); // Gatekeeper (Internet + Time)
 
     try {
-      const hasMore = await processCheckBatch(consoleId, 100);
+      const hasMore = await processCheckBatch(consoleId, 75);
 
       if (!hasMore) {
         console.log("✅ Beres! Semua data diproses. Resetting...");
