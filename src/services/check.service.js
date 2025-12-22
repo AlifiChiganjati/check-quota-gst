@@ -4,13 +4,13 @@ import * as cheerio from "cheerio";
 import pLimit from "p-limit";
 import { httpClient } from "../utils/httpClient.js";
 import RateLimiter from "../utils/rateLimiter.js";
+import { delay } from "../utils/helper.js";
 
 /* =========================
  * CONSTANTS (NEW)
  * ========================= */
 const VALID_YEAR_MIN = 2025;
 const VALID_YEAR_MAX = 2040;
-
 const monthMap = {
   Jan: 0,
   Feb: 1,
@@ -248,7 +248,6 @@ export default class CheckService {
             return {
               kind: "FAILED",
               id,
-              rawHtml: parsed.rawHtml,
               sn,
               msisdn,
               statusPaket: "Network/System Error",

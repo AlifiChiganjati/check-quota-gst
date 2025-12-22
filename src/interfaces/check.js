@@ -1,22 +1,9 @@
 import CheckService from "../services/check.service.js";
-import dns from "dns/promises";
 import RateLimiter from "../utils/rateLimiter.js";
-
+import { delay, isInternetAvailable } from "../utils/helper.js";
 // --- Configuration ---
 const OPERATIONAL_START = 1; // 01:00
-const OPERATIONAL_END = 15; // 20:00
-
-// --- Helpers (KISS) ---
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-
-const isInternetAvailable = async () => {
-  try {
-    await dns.lookup("google.com");
-    return true;
-  } catch {
-    return false;
-  }
-};
+const OPERATIONAL_END = 23; // 20:00
 
 const getStatus = () => {
   const now = new Date();
