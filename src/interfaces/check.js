@@ -68,7 +68,7 @@ const processCheckBatch = async (consoleId, batchLimit = 100) => {
 
   // Bulk insert sekaligus
   await CheckService.insertDB(checked, { batchSize: batchLimit });
-  await delay(Math.random() * 1000);
+  await delay(Math.random() * 3000);
 
   return true;
 };
