@@ -41,7 +41,6 @@ const normalizeText = (txt) =>
 const getStrictRowValue = ($, container, targetTitle) => {
   let foundValue = "";
   const target = targetTitle.toLowerCase().trim();
-
   $(container)
     .find("tr")
     .each((_, el) => {
@@ -195,7 +194,7 @@ export default class CheckService {
                 serialNumber: parsed.serialNumber,
                 sn,
                 msisdn,
-                masaWaktu: parsed.masaTunggu,
+                masaTunggu: parsed.masaTunggu,
                 statusPaket: "Pending Paket",
                 value: {
                   kuota_pending: parsed.pending.kuota,
