@@ -31,6 +31,37 @@ export default class CheckRepository {
       throw err;
     }
   }
+  static async getLastRefs(checkQuotaIds, date) {
+    if (!Array.isArray(checkQuotaIds) || checkQuotaIds.length === 0) return [];
+
+    const sql = `
+    SELECT check_quota_id, MAX(ref) AS lastRef
+    FROM (
+      SELECT check_quota_id, ref
+      FROM gst_log_check_quota
+      WHERE date = ?
+      AND check_quota_id IN (?)
+
+      UNION ALL
+
+      SELECT check_quota_id, ref
+      FROM gst_log_check_quota_error
+      WHERE date = ?
+      AND check_quota_id IN (?)
+    ) t
+    GROUP BY check_quota_id
+  `;
+
+    const [rows] = await db.query(sql, [
+      date,
+      checkQuotaIds,
+      date,
+      checkQuotaIds,
+    ]);
+
+    return rows;
+  }
+
   // repository/check.repository.js
   static async insertBulkLog(tableName, batch) {
     if (!Array.isArray(batch) || batch.length === 0) return null;
@@ -97,18 +128,18 @@ VALUES ${placeholders} `;
     return rows;
   }
   // Batch get lastRef per check_quota_id for date
-  static async getLastRefs(checkQuotaIds, date) {
-    if (!Array.isArray(checkQuotaIds) || checkQuotaIds.length === 0) return [];
-    const sql = `
-      SELECT check_quota_id, COALESCE(MAX(ref), 0) AS lastRef
-      FROM gst_log_check_quota
-      WHERE date = ?
-      AND check_quota_id IN (?)
-      GROUP BY check_quota_id
-    `;
-    const [rows] = await db.query(sql, [date, checkQuotaIds]);
-    return rows;
-  }
+  // static async getLastRefs(checkQuotaIds, date) {
+  //   if (!Array.isArray(checkQuotaIds) || checkQuotaIds.length === 0) return [];
+  //   const sql = `
+  //     SELECT check_quota_id, COALESCE(MAX(ref), 0) AS lastRef
+  //     FROM gst_log_check_quota
+  //     WHERE date = ?
+  //     AND check_quota_id IN (?)
+  //     GROUP BY check_quota_id
+  //   `;
+  //   const [rows] = await db.query(sql, [date, checkQuotaIds]);
+  //   return rows;
+  // }
 
   static async isAlreadyInserted(check_gst_id, date) {
     const [rows] = await db.query(

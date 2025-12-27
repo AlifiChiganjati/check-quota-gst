@@ -275,6 +275,7 @@ export default class CheckService {
       }
     }
     const lastRefsRows = await CheckRepository.getLastRefs(allIds, today);
+
     const refMap = new Map(
       lastRefsRows.map((r) => [r.check_quota_id, r.lastRef]),
     );
