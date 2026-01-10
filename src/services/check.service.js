@@ -96,7 +96,8 @@ const parseAndValidateDate = (dateStr) => {
  * ========================= */
 async function parsePage({ url, rateLimiter }) {
   await rateLimiter.removeToken();
-  const res = await httpClient.get(url);
+  const urlLowerCase = toLowerCase(url);
+  const res = await httpClient.get(urlLowerCase);
   const $ = cheerio.load(cleanHtml(res.data)); // <-- Sanitasi di sini!
   const rawHtml = res.data;
   const findSection = (title) =>
