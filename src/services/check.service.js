@@ -96,8 +96,8 @@ const parseAndValidateDate = (dateStr) => {
  * ========================= */
 async function parsePage({ url, rateLimiter }) {
   await rateLimiter.removeToken();
-  const urlLowerCase = toLowerCase(url);
-  const res = await httpClient.get(urlLowerCase);
+  const urlToLowerCase = url.toLowerCase();
+  const res = await httpClient.get(urlToLowerCase);
   const $ = cheerio.load(cleanHtml(res.data)); // <-- Sanitasi di sini!
   const rawHtml = res.data;
   const findSection = (title) =>
@@ -321,13 +321,6 @@ export default class CheckService {
       id: item.id,
       newStatus: item.newStatus,
     }));
-    // 4. Batch Execution (DRY Principle)
-    // const runBatch = async (data, tableName) => {
-    //   for (let i = 0; i < data.length; i += BATCH_SIZE) {
-    //     const chunk = data.slice(i, i + BATCH_SIZE);
-    //     await CheckRepository.insertBulkLog(tableName, chunk);
-    //   }
-    // };
 
     try {
       // Jalankan semua bulk insert
