@@ -3,7 +3,7 @@ import RateLimiter from "../utils/rateLimiter.js";
 import { delay, isInternetAvailable } from "../utils/helper.js";
 // --- Configuration ---
 const OPERATIONAL_START = 1; // 01:00
-const OPERATIONAL_END = 20; // 20:00
+const OPERATIONAL_END = 15; // 15:00
 
 const getStatus = () => {
   const now = new Date();
@@ -49,7 +49,7 @@ const ensureReadyToWork = async () => {
 };
 
 // --- Core Logic ---
-const processCheckBatch = async (consoleId, batchLimit = 100) => {
+const processCheckBatch = async (consoleId, batchLimit = 500) => {
   // Ambil URL dalam jumlah banyak sekaligus (Problem Solver: Mengurangi Round-trip)
   const urls = await CheckService.listUrls(consoleId, batchLimit);
 
@@ -83,7 +83,7 @@ const runCheck = async (consoleId) => {
     await ensureReadyToWork(); // Gatekeeper (Internet + Time)
 
     try {
-      const hasMore = await processCheckBatch(consoleId, 100);
+      const hasMore = await processCheckBatch(consoleId, 500);
 
       if (!hasMore) {
         console.log("✅ Beres! Semua data diproses. Resetting...");

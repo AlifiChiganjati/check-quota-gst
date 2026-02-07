@@ -22,7 +22,7 @@ function showMenu() {
   console.log("   🔧 PILIH MODE EKSEKUSI PROGRAM");
   console.log("=====================================");
   console.log("  0. Jalankan cron_update (update otomatis harian)");
-  for (let i = 1; i <= 20; i++) {
+  for (let i = 1; i <= 10; i++) {
     console.log(`  ${i}. Jalankan check consoleId = ${i}`);
   }
   console.log("  21. Jalankan backup data");
@@ -37,12 +37,12 @@ function startCLI() {
 
   showMenu();
 
-  rl.question("Masukkan pilihan (0–21): ", async (answer) => {
+  rl.question("Masukkan pilihan (0–11): ", async (answer) => {
     const choice = parseInt(answer.trim(), 10);
 
-    if (isNaN(choice) || choice < 0 || choice > 21) {
+    if (isNaN(choice) || choice < 0 || choice > 11) {
       console.log(
-        "⚠️ Pilihan tidak valid! Masukkan angka antara 0–21 ya~ (/'3')/",
+        "⚠️ Pilihan tidak valid! Masukkan angka antara 0–11 ya~ (/'3')/",
       );
       rl.close();
       return;
@@ -51,10 +51,10 @@ function startCLI() {
     if (choice === 0) {
       console.log("▶️ Menjalankan cron_update...");
       await run("cron_update");
-    } else if (choice >= 1 && choice <= 20) {
+    } else if (choice >= 1 && choice <= 10) {
       console.log(`▶️ Menjalankan check dengan consoleId=${choice}...`);
       await run("check", choice);
-    } else if (choice === 21) {
+    } else if (choice === 11) {
       console.log("💾 Menjalankan backup data...");
       await run("backup");
     }
