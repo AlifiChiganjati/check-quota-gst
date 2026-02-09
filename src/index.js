@@ -40,7 +40,7 @@ function startCLI() {
   rl.question("Masukkan pilihan (0–15): ", async (answer) => {
     const choice = parseInt(answer.trim(), 10);
 
-    if (isNaN(choice) || choice < 0 || choice > 11) {
+    if (isNaN(choice) || choice < 0 || choice > 16) {
       console.log(
         "⚠️ Pilihan tidak valid! Masukkan angka antara 0–11 ya~ (/'3')/",
       );

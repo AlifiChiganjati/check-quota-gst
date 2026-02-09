@@ -49,7 +49,7 @@ const ensureReadyToWork = async () => {
 };
 
 // --- Core Logic ---
-const processCheckBatch = async (consoleId, batchLimit = 200) => {
+const processCheckBatch = async (consoleId, batchLimit = 100) => {
   // Ambil URL dalam jumlah banyak sekaligus (Problem Solver: Mengurangi Round-trip)
   const urls = await CheckService.listUrls(consoleId, batchLimit);
 
@@ -61,29 +61,29 @@ const processCheckBatch = async (consoleId, batchLimit = 200) => {
   console.log(`📦 Memproses batch sebesar: ${urls.length} data...`);
 
   // Naikkan concurrency kalau internet kuat (KISS)
-  const concurrencyLevel = 5;
+  const concurrencyLevel = 10;
   const myLimiter = new RateLimiter(concurrencyLevel);
 
   const checked = await CheckService.checkAllUrls(urls, {
     concurrency: concurrencyLevel,
     rateLimiter: myLimiter,
   });
+  if (checked.length === 0) return false;
 
   // Bulk insert sekaligus
   await CheckService.insertDB(checked, { batchSize: batchLimit });
-  await delay(Math.random() * 3000);
 
   return true;
 };
 
 const runCheck = async (consoleId) => {
   console.log("🚀 Program dimulai...");
-  await delay(Math.random() * 10000);
+  await delay(Math.random() * 3000);
   while (true) {
     await ensureReadyToWork(); // Gatekeeper (Internet + Time)
 
     try {
-      const hasMore = await processCheckBatch(consoleId, 200);
+      const hasMore = await processCheckBatch(consoleId, 100);
 
       if (!hasMore) {
         console.log("✅ Beres! Semua data diproses. Resetting...");

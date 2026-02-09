@@ -4,7 +4,6 @@ import * as cheerio from "cheerio";
 import pLimit from "p-limit";
 import { httpClient } from "../utils/httpClient.js";
 import RateLimiter from "../utils/rateLimiter.js";
-import { delay } from "../utils/helper.js";
 
 /* =========================
  * CONSTANTS (NEW)
@@ -167,7 +166,6 @@ export default class CheckService {
       urls.map(({ id, url_check, sn, msisdn }) =>
         limit(async () => {
           try {
-            await delay(Math.random() * 700);
             const parsed = await parsePage({ url: url_check, rateLimiter });
             // 1. Guard Clause: Identitas Wajib Ada
             if (
