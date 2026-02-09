@@ -3,40 +3,64 @@ import db from "../config/db.js";
 
 export default class CheckRepository {
   static async getAllUrl(consoleId, limit = 10) {
+    const lockName = `GST_CLAIM_${consoleId}`;
+
+    // 1️⃣ Ambil lock (tunggu max 3 detik)
+    const [[lock]] = await db.query(`SELECT GET_LOCK(?, 3) AS gotLock`, [
+      lockName,
+    ]);
+
+    if (lock.gotLock !== 1) {
+      // gagal dapet lock → jangan paksa
+      return [];
+    }
+
     try {
-      await db.query(
-        `UPDATE gst_check_quota
-              SET status = 1
-              WHERE id IN (
-              SELECT id FROM (
-             SELECT id
-             FROM gst_check_quota
-             WHERE status = 0
-             AND console = ?
-             ORDER BY id ASC
-             LIMIT ?
-              ) x
-            );`,
+      // 2️⃣ Ambil ID dulu
+      const [ids] = await db.query(
+        `
+      SELECT id
+      FROM gst_check_quota
+      WHERE status = 0
+      AND console = ?
+      ORDER BY id ASC
+      LIMIT ?
+      `,
         [consoleId, limit],
       );
 
-      // 2. Ambil data yang barusan kita tandai
+      if (ids.length === 0) return [];
+
+      const idList = ids.map((r) => r.id);
+
+      // 3️⃣ Tandai sebagai processing
+      await db.query(
+        `
+      UPDATE gst_check_quota
+      SET status = 1
+      WHERE id IN (?)
+      `,
+        [idList],
+      );
+
+      // 4️⃣ Ambil data lengkap
       const [rows] = await db.query(
-        `SELECT id, url_check, sn, msisdn
-FROM gst_check_quota
-WHERE status = 1
-AND console = ?
-ORDER BY id ASC
-LIMIT ?`,
-        [consoleId, limit],
+        `
+      SELECT id, url_check, sn, msisdn
+      FROM gst_check_quota
+      WHERE id IN (?)
+      ORDER BY id ASC
+      `,
+        [idList],
       );
 
       return rows;
-    } catch (err) {
-      console.error("Duh, gagal ambil URL:", err);
-      throw err;
+    } finally {
+      // 5️⃣ LEPAS LOCK (WAJIB)
+      await db.query(`SELECT RELEASE_LOCK(?)`, [lockName]);
     }
   }
+
   static async getLastRefs(checkQuotaIds, date) {
     if (!Array.isArray(checkQuotaIds) || checkQuotaIds.length === 0) return [];
 
