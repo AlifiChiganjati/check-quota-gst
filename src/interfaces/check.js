@@ -49,7 +49,7 @@ const ensureReadyToWork = async () => {
 };
 
 // --- Core Logic ---
-const processCheckBatch = async (consoleId, batchLimit = 500) => {
+const processCheckBatch = async (consoleId, batchLimit = 200) => {
   // Ambil URL dalam jumlah banyak sekaligus (Problem Solver: Mengurangi Round-trip)
   const urls = await CheckService.listUrls(consoleId, batchLimit);
 
@@ -83,7 +83,7 @@ const runCheck = async (consoleId) => {
     await ensureReadyToWork(); // Gatekeeper (Internet + Time)
 
     try {
-      const hasMore = await processCheckBatch(consoleId, 500);
+      const hasMore = await processCheckBatch(consoleId, 200);
 
       if (!hasMore) {
         console.log("✅ Beres! Semua data diproses. Resetting...");
