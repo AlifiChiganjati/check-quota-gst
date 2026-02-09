@@ -98,7 +98,6 @@ async function parsePage({ url, rateLimiter }) {
   const urlToLowerCase = url.toLowerCase();
   const res = await httpClient.get(urlToLowerCase);
   const $ = cheerio.load(cleanHtml(res.data)); // <-- Sanitasi di sini!
-  const rawHtml = res.data;
   const findSection = (title) =>
     $(".info-item").filter((_, el) => {
       const currentTitle = normalizeText($(el).find(".title").text());
@@ -136,7 +135,6 @@ async function parsePage({ url, rateLimiter }) {
   };
 
   return {
-    rawHtml,
     serialNumber,
     phoneNumber,
     pageError,
@@ -159,101 +157,91 @@ export default class CheckService {
     return await CheckRepository.getAllUrl(consoleId, limit);
   }
   static async checkAllUrls(urls, opts = {}) {
-    const limit = pLimit(opts.concurrency ?? 10);
     const rateLimiter = opts.rateLimiter || new RateLimiter(opts.rps ?? 30);
 
     return Promise.all(
-      urls.map(({ id, url_check, sn, msisdn }) =>
-        limit(async () => {
-          try {
-            const parsed = await parsePage({ url: url_check, rateLimiter });
-            // 1. Guard Clause: Identitas Wajib Ada
-            if (
-              !parsed.serialNumber ||
-              !parsed.phoneNumber ||
-              parsed.pageError
-            ) {
-              return {
-                kind: "FAILED",
-                id,
-                rawHtml: parsed.rawHtml,
-                sn,
-                msisdn,
-                statusPaket: `Error: ${parsed.pageError || "Data Incomplete"}`,
-              };
-            }
+      urls.map(async ({ id, url_check, sn, msisdn }) => {
+        try {
+          const parsed = await parsePage({ url: url_check, rateLimiter });
 
-            // 2. Logic: Pending Paket
-            if (parsed.pending.kuota && parsed.pending.redeem.valid) {
-              return {
-                kind: "SUCCESS",
-                id,
-                rawHtml: parsed.rawHtml,
-                phoneNumber: parsed.phoneNumber,
-                serialNumber: parsed.serialNumber,
-                sn,
-                msisdn,
-                masaTunggu: parsed.masaTunggu,
-                statusPaket: "Pending Paket",
-                value: {
-                  kuota_pending: parsed.pending.kuota,
-                  redeem_pending: parsed.pending.redeem.text,
-                },
-              };
-            }
-
-            // 3. Logic: Active Value (YAGNI: Hanya sukses jika MTP valid)
-            if (parsed.masaWaktu && parsed.masaTungguPaketValid) {
-              const total = (val) => {
-                const m = String(val).match(/(\d+(\.\d+)?)/);
-                return m ? Number(m[1]) : 0;
-              };
-              const sisa =
-                total(parsed.kuotaNasional) +
-                total(parsed.kuotaLokal) +
-                total(parsed.lainnya);
-
-              return {
-                kind: "SUCCESS",
-                id,
-                rawHtml: parsed.rawHtml,
-                phoneNumber: parsed.phoneNumber,
-                serialNumber: parsed.serialNumber,
-                sn,
-                msisdn,
-                masaTunggu: parsed.masaTunggu,
-                statusPaket: "Value",
-                kuota: `${sisa}`,
-                value: {
-                  masa_waktu: parsed.masaWaktu,
-                  kuota_nasional: parsed.kuotaNasional,
-                  kuota_local: parsed.kuotaLokal,
-                  kuota_lainnya: parsed.lainnya,
-                  masa_tunggu_paket: parsed.masaTungguPaket,
-                },
-              };
-            }
-
-            // 4. Default Fail
-            return {
-              kind: "FAILED",
-              id,
-              rawHtml: parsed.rawHtml,
-              sn,
-              msisdn,
-              statusPaket: "Data Paket Invalid/Incomplete",
-            };
-          } catch (err) {
+          // 1. Guard Clause: Identitas Wajib Ada
+          if (!parsed.serialNumber || !parsed.phoneNumber || parsed.pageError) {
             return {
               kind: "FAILED",
               id,
               sn,
               msisdn,
-              statusPaket: "Network/System Error",
+              statusPaket: `Error: ${parsed.pageError || "Data Incomplete"}`,
             };
           }
-        }),
-      ),
+
+          // 2. Logic: Pending Paket
+          if (parsed.pending.kuota && parsed.pending.redeem.valid) {
+            return {
+              kind: "SUCCESS",
+              id,
+              phoneNumber: parsed.phoneNumber,
+              serialNumber: parsed.serialNumber,
+              sn,
+              msisdn,
+              masaTunggu: parsed.masaTunggu,
+              statusPaket: "Pending Paket",
+              value: {
+                kuota_pending: parsed.pending.kuota,
+                redeem_pending: parsed.pending.redeem.text,
+              },
+            };
+          }
+
+          // 3. Logic: Active Value (YAGNI: Hanya sukses jika MTP valid)
+          if (parsed.masaWaktu && parsed.masaTungguPaketValid) {
+            const total = (val) => {
+              const m = String(val).match(/(\d+(\.\d+)?)/);
+              return m ? Number(m[1]) : 0;
+            };
+            const sisa =
+              total(parsed.kuotaNasional) +
+              total(parsed.kuotaLokal) +
+              total(parsed.lainnya);
+
+            return {
+              kind: "SUCCESS",
+              id,
+              phoneNumber: parsed.phoneNumber,
+              serialNumber: parsed.serialNumber,
+              sn,
+              msisdn,
+              masaTunggu: parsed.masaTunggu,
+              statusPaket: "Value",
+              kuota: `${sisa}`,
+              value: {
+                masa_waktu: parsed.masaWaktu,
+                kuota_nasional: parsed.kuotaNasional,
+                kuota_local: parsed.kuotaLokal,
+                kuota_lainnya: parsed.lainnya,
+                masa_tunggu_paket: parsed.masaTungguPaket,
+              },
+            };
+          }
+
+          // 4. Default Fail
+          return {
+            kind: "FAILED",
+            id,
+            sn,
+            msisdn,
+            statusPaket: "Data Paket Invalid/Incomplete",
+          };
+        } catch (err) {
+          return {
+            kind: "FAILED",
+            id,
+            sn,
+            msisdn,
+            statusPaket: "Network/System Error",
+          };
+        }
+      }),
     );
   }
   // ----------------------------
@@ -302,7 +290,6 @@ export default class CheckService {
           id: data.id,
           isFailed,
           newStatus: isFailed ? 2 : 4,
-          raw_html: data.rawHtml,
           sn: data.serialNumber || data.sn,
           msisdn:
             data.phoneNumber && data.phoneNumber.length > 5

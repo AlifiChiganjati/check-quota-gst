@@ -133,19 +133,6 @@ VALUES ${placeholders} `;
     const [rows] = await db.query(sql, [date, checkQuotaIds]);
     return rows;
   }
-  // Batch get lastRef per check_quota_id for date
-  // static async getLastRefs(checkQuotaIds, date) {
-  //   if (!Array.isArray(checkQuotaIds) || checkQuotaIds.length === 0) return [];
-  //   const sql = `
-  //     SELECT check_quota_id, COALESCE(MAX(ref), 0) AS lastRef
-  //     FROM gst_log_check_quota
-  //     WHERE date = ?
-  //     AND check_quota_id IN (?)
-  //     GROUP BY check_quota_id
-  //   `;
-  //   const [rows] = await db.query(sql, [date, checkQuotaIds]);
-  //   return rows;
-  // }
 
   static async isAlreadyInserted(check_gst_id, date) {
     const [rows] = await db.query(
