@@ -73,7 +73,6 @@ LIMIT ?`,
     if (!Array.isArray(batch) || batch.length === 0) return null;
 
     const cols = [
-      "raw_html",
       "sn",
       "msisdn",
       "masa_tunggu_kartu",
@@ -98,7 +97,6 @@ VALUES ${placeholders} `;
     for (const row of batch) {
       // Pastikan mapping di sini konsisten dengan array 'cols' di atas!
       values.push(
-        row.raw_html || null,
         row.sn || null,
         row.msisdn || null, // Sekarang ini aman karena data sudah di-flatten di service
         row.masa_tunggu_kartu || null,
