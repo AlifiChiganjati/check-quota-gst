@@ -280,39 +280,50 @@ export default class CheckService {
     const refMap = new Map(
       lastRefsRows.map((r) => [r.check_quota_id, r.lastRef]),
     );
-    const normalized = uniqueInput.map((data) => {
-      const isErrorKind = data.kind === "FAILED";
-      const statusPaket = data.statusPaket || "";
-      const isFailed =
-        isErrorKind || statusPaket.toLowerCase().startsWith("error");
+    const existingLogs = await CheckRepository.getExistingLogs(allIds, today);
+    const existingSet = new Set(existingLogs.map((r) => r.check_quota_id));
 
-      const currentLastRef = refMap.get(data.id) || 0;
-      const nextRef = currentLastRef + 1;
-      refMap.set(data.id, nextRef); // Update map supaya kalau di batch ini ada ID sama lagi, ref-nya lanjut
-      return {
-        // Data untuk logic Service
-        id: data.id,
-        isFailed: isFailed,
-        newStatus: isFailed ? 2 : 4,
-        raw_html: data.rawHtml,
-        sn: data.serialNumber || data.sn,
-        msisdn:
-          data.phoneNumber && data.phoneNumber.length > 5
-            ? data.phoneNumber
-            : data.msisdn !== data.sn
-              ? data.msisdn
-              : null,
-        masa_tunggu_kartu: data.masaTunggu?.tanggal || null,
-        status: data.masaTunggu?.status || null,
-        status_paket: statusPaket,
-        kuota: data.kuota || "0",
-        check_quota_id: data.id,
-        date: today,
-        date_check: new Date(),
-        value_check: data.value || { message: "check url", id: data.id },
-        ref: nextRef,
-      };
-    });
+    const normalized = uniqueInput
+      .map((data) => {
+        const statusPaket = data.statusPaket || "";
+        const isFailed = data.kind === "FAILED";
+
+        // 🔒 STOP: FAILED + sudah ada log hari ini → SKIP TOTAL
+        if (isFailed && existingSet.has(data.id)) {
+          return null;
+        }
+
+        const currentLastRef = refMap.get(data.id) || 0;
+        const nextRef = isFailed ? currentLastRef : currentLastRef + 1;
+
+        if (!isFailed) {
+          refMap.set(data.id, nextRef);
+        }
+
+        return {
+          id: data.id,
+          isFailed,
+          newStatus: isFailed ? 2 : 4,
+          raw_html: data.rawHtml,
+          sn: data.serialNumber || data.sn,
+          msisdn:
+            data.phoneNumber && data.phoneNumber.length > 5
+              ? data.phoneNumber
+              : data.msisdn !== data.sn
+                ? data.msisdn
+                : null,
+          masa_tunggu_kartu: data.masaTunggu?.tanggal || null,
+          status: data.masaTunggu?.status || null,
+          status_paket: statusPaket,
+          kuota: data.kuota || "0",
+          check_quota_id: data.id,
+          date: today,
+          date_check: new Date(),
+          value_check: data.value || { message: "check url", id: data.id },
+          ref: nextRef,
+        };
+      })
+      .filter(Boolean); // ⬅️ PENTING
 
     // 5. Bucket Sorting
     const successBuffer = normalized.filter((item) => !item.isFailed);

@@ -5,23 +5,29 @@ export default class CheckRepository {
   static async getAllUrl(consoleId, limit = 10) {
     try {
       await db.query(
-        `UPDATE gst_check_quota 
-             SET status = 1 
-             WHERE status = 0 
-               AND console = ? 
-             ORDER BY id ASC 
-             LIMIT ?`,
+        `UPDATE gst_check_quota
+              SET status = 1
+              WHERE id IN (
+              SELECT id FROM (
+             SELECT id
+             FROM gst_check_quota
+             WHERE status = 0
+             AND console = ?
+             ORDER BY id ASC
+             LIMIT ?
+              ) x
+            );`,
         [consoleId, limit],
       );
 
       // 2. Ambil data yang barusan kita tandai
       const [rows] = await db.query(
-        `SELECT id, url_check, sn, msisdn 
-             FROM gst_check_quota 
-             WHERE status = 1 
-               AND console = ? 
-             ORDER BY id ASC 
-             LIMIT ?`,
+        `SELECT id, url_check, sn, msisdn
+FROM gst_check_quota
+WHERE status = 1
+AND console = ?
+ORDER BY id ASC
+LIMIT ?`,
         [consoleId, limit],
       );
 
