@@ -49,37 +49,44 @@ const ensureReadyToWork = async () => {
 };
 
 // --- Core Logic ---
-const processCheckBatch = async (consoleId, batchLimit = 10) => {
+const processCheckBatch = async (consoleId, batchLimit = 50) => {
   // Ambil URL dalam jumlah banyak sekaligus (Problem Solver: Mengurangi Round-trip)
-  const urls = await CheckService.listUrls(consoleId, batchLimit);
+  const CLAIM_LIMIT = 50; // sekali claim banyak
+  const PROCESS_CHUNK = 10; // proses kecil-kecil
+  const urls = await CheckService.listUrls(consoleId, CLAIM_LIMIT);
+  let hasResetError = false;
 
   if (!urls || urls.length === 0) {
-    await CheckService.resetAllErrorToZero(consoleId);
+    if (!hasResetError) {
+      await CheckService.resetAllErrorToZero(consoleId);
+      hasResetError = true;
+    }
     return false;
   }
+  hasResetError = false;
 
   console.log(`📦 Memproses batch sebesar: ${urls.length} data...`);
-
   // Naikkan concurrency kalau internet kuat (KISS)
-  const concurrencyLevel = 5;
+  const concurrencyLevel = 3;
   const myLimiter = new RateLimiter(concurrencyLevel);
 
-  const checked = await CheckService.checkAllUrls(urls, {
-    concurrency: concurrencyLevel,
-    rateLimiter: myLimiter,
-  });
-  if (checked.length === 0) return false;
+  for (let i = 0; i < urls.length; i += PROCESS_CHUNK) {
+    const chunk = urls.slice(i, i + PROCESS_CHUNK);
 
-  // Bulk insert sekaligus
-  await CheckService.insertDB(checked, { batchSize: batchLimit });
-  await delay(Math.random() * 3000);
+    const checked = await CheckService.checkAllUrls(chunk, {
+      rateLimiter: myLimiter,
+    });
 
+    await CheckService.insertDB(checked, { batchSize: PROCESS_CHUNK });
+    await delay(300); // breathing space
+  }
   return true;
 };
 
 const runCheck = async (consoleId) => {
   console.log("🚀 Program dimulai...");
   await delay(Math.random() * 3000);
+  let idleCount = 0;
   while (true) {
     await ensureReadyToWork(); // Gatekeeper (Internet + Time)
 
@@ -87,6 +94,7 @@ const runCheck = async (consoleId) => {
       const hasMore = await processCheckBatch(consoleId, 50);
 
       if (!hasMore) {
+        idleCount++;
         console.log("✅ Beres! Semua data diproses. Resetting...");
         await CheckService.resetStatusGstStuck(consoleId);
         await CheckService.resetStatusGst(consoleId);
@@ -94,6 +102,7 @@ const runCheck = async (consoleId) => {
         console.log("🕒 Istirahat 1 menit dulu ya senpai... (/'3')/");
         await delay(1 * 60 * 1000);
       }
+      idleCount = 0;
       await delay(1000);
     } catch (err) {
       console.error("❌ Error:", err.message);
