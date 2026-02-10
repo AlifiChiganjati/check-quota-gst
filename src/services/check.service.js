@@ -1,7 +1,6 @@
-//service
+//service.service.js ini bisnis logic
 import CheckRepository from "../repository/check.repository.js";
 import * as cheerio from "cheerio";
-import pLimit from "p-limit";
 import { httpClient } from "../utils/httpClient.js";
 import RateLimiter from "../utils/rateLimiter.js";
 
@@ -92,6 +91,7 @@ const parseAndValidateDate = (dateStr) => {
 };
 /* =========================
  * REFACTORED PAGE PARSER
+ * ini proses pengambilan nilai value apasaja yg dibutuhkan
  * ========================= */
 async function parsePage({ url, rateLimiter }) {
   await rateLimiter.removeToken();
@@ -153,9 +153,12 @@ async function parsePage({ url, rateLimiter }) {
  * SERVICE
  * ========================= */
 export default class CheckService {
+  //listUrls ini untuk ambil url yg akan di proses
   static async listUrls(consoleId, limit = 10) {
     return await CheckRepository.getAllUrl(consoleId, limit);
   }
+
+  // checkAllUrls ini proses penentuan dia akan jadi valid nilai nya atau error
   static async checkAllUrls(urls, opts = {}) {
     const rateLimiter = opts.rateLimiter || new RateLimiter(opts.rps ?? 30);
 
@@ -246,6 +249,7 @@ export default class CheckService {
   }
   // ----------------------------
   // insertDB: optimized batch path
+  // ini proses insert ke db
   // ----------------------------
   static async insertDB(results, opts = {}) {
     const BATCH_SIZE = opts.batchSize ?? 100;

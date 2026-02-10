@@ -1,7 +1,11 @@
+// check.js ini handler
 import CheckService from "../services/check.service.js";
 import RateLimiter from "../utils/rateLimiter.js";
 import { delay, isInternetAvailable } from "../utils/helper.js";
-// --- Configuration ---
+/* ATUR JAM OEPRASIONAL PROGRAMM CHECK QUOTA
+ * OPERATIONAL_START mulai 1 pagi
+ * OPERATIONAL_END akhir dari program jam 3 sore
+ */
 const OPERATIONAL_START = 1; // 01:00
 const OPERATIONAL_END = 15; // 15:00
 
@@ -10,7 +14,6 @@ const getStatus = () => {
   const hour = now.getHours();
   const isWorkingTime = hour >= OPERATIONAL_START && hour < OPERATIONAL_END;
 
-  // Hitung waktu tunggu sampai jam 1 pagi besok kalau sudah lewat jam 8 malam
   let msUntilStart = 0;
   if (!isWorkingTime) {
     const nextStart = new Date();

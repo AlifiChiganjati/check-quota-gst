@@ -1,4 +1,4 @@
-// repository/check.repository.js
+// repository/check.repository.js ini adalah query-query yang akan dipakai.
 import db from "../config/db.js";
 
 export default class CheckRepository {
