@@ -6,6 +6,8 @@ jadi program di bagi jadi beberapa layer agar mudah saat di maintenance.
 
 REPOSITORY > SERVICE > INTERFACE > index.js
 
+kalau mau lihat prosses jalannya program ada di interfaces/check.js
+
 ## SUMMARY
 
 - repository: query yang di akan di pakai
