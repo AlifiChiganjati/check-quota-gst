@@ -54,6 +54,8 @@ const processCheckBatch = async (consoleId, batchLimit = 50) => {
   const CLAIM_LIMIT = 50; // sekali claim banyak
   const PROCESS_CHUNK = 10; // proses kecil-kecil
   const urls = await CheckService.listUrls(consoleId, CLAIM_LIMIT);
+  await delay(Math.random() * 500);
+
   let hasResetError = false;
 
   if (!urls || urls.length === 0) {
@@ -78,7 +80,7 @@ const processCheckBatch = async (consoleId, batchLimit = 50) => {
     });
 
     await CheckService.insertDB(checked, { batchSize: PROCESS_CHUNK });
-    await delay(300); // breathing space
+    await delay(500);
   }
   return true;
 };
