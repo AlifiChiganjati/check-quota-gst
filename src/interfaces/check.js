@@ -83,7 +83,7 @@ const processCheckBatch = async (consoleId, batchLimit = 50) => {
     });
 
     await CheckService.insertDB(checked, { batchSize: PROCESS_CHUNK });
-    await delay(500);
+    await delay(300);
   }
   return true;
 };
