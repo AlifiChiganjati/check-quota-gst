@@ -70,7 +70,9 @@ const processCheckBatch = async (consoleId, batchLimit = 50) => {
   }
   hasResetError = false;
 
-  console.log(`📦 Memproses batch sebesar: ${urls.length} data...`);
+  console.log(
+    `📦 Memproses batch sebesar: ${urls.length} data di konsole ${consoleId}`,
+  );
   // Naikkan concurrency kalau internet kuat (KISS)
   const concurrencyLevel = 3;
   const myLimiter = new RateLimiter(concurrencyLevel);
@@ -89,7 +91,7 @@ const processCheckBatch = async (consoleId, batchLimit = 50) => {
 };
 
 const runCheck = async (consoleId) => {
-  console.log("🚀 Program dimulai...");
+  console.log("🚀 Program dimulai di konsole " + consoleId);
   await delay(Math.random() * 3000);
   let idleCount = 0;
   while (true) {
@@ -104,7 +106,9 @@ const runCheck = async (consoleId) => {
         await CheckService.resetStatusGstStuck(consoleId);
         await CheckService.resetStatusGst(consoleId);
 
-        console.log("🕒 Istirahat 1 menit dulu ya senpai... (/'3')/");
+        console.log(
+          `🕒 Konsole ${consoleId} istirahat 1 menit dulu ya senpai... (/'3')/`,
+        );
         await delay(1 * 60 * 1000);
       }
       idleCount = 0;
