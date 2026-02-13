@@ -284,8 +284,13 @@ export default class CheckService {
         // }
 
         const currentLastRef = refMap.get(data.id) || 0;
-        const nextRef = currentLastRef + 1;
-        refMap.set(data.id, nextRef);
+
+        let nextRef = currentLastRef;
+
+        if (!isFailed) {
+          nextRef = currentLastRef + 1;
+          refMap.set(data.id, nextRef);
+        }
 
         return {
           id: data.id,
@@ -317,18 +322,14 @@ export default class CheckService {
     const statusPairs = normalized.map((item) => ({
       id: item.id,
       newStatus: item.newStatus,
+      lastError: item.isFailed ? item.status_paket : null,
     }));
 
     try {
       // Jalankan semua bulk insert
       if (successBuffer.length > 0)
         await this.runBatch(successBuffer, "gst_log_check_quota", BATCH_SIZE);
-      if (errorBuffer.length > 0)
-        await this.runBatch(
-          errorBuffer,
-          "gst_log_check_quota_error",
-          BATCH_SIZE,
-        );
+
       if (statusPairs.length > 0)
         await CheckRepository.bulkUpdateStatuses(statusPairs, BATCH_SIZE);
       console.log(`Berhasil insert ${normalized.length} data baru! (/'3')/`);

@@ -66,29 +66,13 @@ export default class CheckRepository {
 
     const sql = `
     SELECT check_quota_id, MAX(ref) AS lastRef
-    FROM (
-      SELECT check_quota_id, ref
-      FROM gst_log_check_quota
-      WHERE date = ?
-      AND check_quota_id IN (?)
-
-      UNION ALL
-
-      SELECT check_quota_id, ref
-      FROM gst_log_check_quota_error
-      WHERE date = ?
-      AND check_quota_id IN (?)
-    ) t
+    FROM gst_log_check_quota
+    WHERE date = ?
+    AND check_quota_id IN (?)
     GROUP BY check_quota_id
   `;
 
-    const [rows] = await db.query(sql, [
-      date,
-      checkQuotaIds,
-      date,
-      checkQuotaIds,
-    ]);
-
+    const [rows] = await db.query(sql, [date, checkQuotaIds]);
     return rows;
   }
 
@@ -226,29 +210,51 @@ VALUES ${placeholders} `;
   static async bulkUpdateStatuses(pairs, batchSize = 500) {
     if (!Array.isArray(pairs) || pairs.length === 0) return null;
 
-    // Tambahan safety: Sort lagi di sini buat jaga-jaga kalau servicenya lupa!
-    pairs.sort((a, b) => a.id - b.id);
-
     for (let i = 0; i < pairs.length; i += batchSize) {
       const chunk = pairs.slice(i, i + batchSize);
-      const ids = chunk.map((p) => p.id);
 
-      // SQL IN (?) butuh array IDs yang juga terurut sesuai CASE
-      const cases = chunk
-        .map((p) => `WHEN ${p.id} THEN ${p.newStatus}`)
-        .join(" ");
+      const ids = [];
+      const statusCases = [];
+      const errorCases = [];
+      const statusValues = [];
+      const errorValues = [];
+
+      chunk.forEach((p) => {
+        ids.push(p.id);
+
+        // status
+        statusCases.push(`WHEN ${p.id} THEN ?`);
+        statusValues.push(p.newStatus);
+
+        // error message
+        if (typeof p.lastError === "string" && p.lastError.length > 0) {
+          errorCases.push(`WHEN ${p.id} THEN ?`);
+          errorValues.push(p.lastError);
+        }
+      });
 
       const sql = `
-        UPDATE gst_check_quota
-        SET status = CASE id
-          ${cases}
+      UPDATE gst_check_quota
+      SET
+        status = CASE id
+          ${statusCases.join(" ")}
           ELSE status
         END
-        WHERE id IN (?)
-      `;
+        ${
+          errorCases.length > 0
+            ? `,
+        last_error_message = CASE id
+          ${errorCases.join(" ")}
+          ELSE last_error_message
+        END`
+            : ""
+        }
+      WHERE id IN (${ids.join(",")})
+    `;
 
-      await db.query(sql, [ids]);
+      await db.query(sql, [...statusValues, ...errorValues]);
     }
+
     return { success: true };
   }
 

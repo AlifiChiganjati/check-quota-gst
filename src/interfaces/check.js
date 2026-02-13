@@ -7,7 +7,7 @@ import { delay, isInternetAvailable } from "../utils/helper.js";
  * OPERATIONAL_END akhir dari program jam 3 sore
  */
 const OPERATIONAL_START = 1; // 01:00
-const OPERATIONAL_END = 15; // 15:00
+const OPERATIONAL_END = 20; // 15:00
 
 const getStatus = () => {
   const now = new Date();
