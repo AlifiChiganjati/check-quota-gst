@@ -279,16 +279,13 @@ export default class CheckService {
         const isFailed = data.kind === "FAILED";
 
         // 🔒 STOP: FAILED + sudah ada log hari ini → SKIP TOTAL
-        if (isFailed && existingSet.has(data.id)) {
-          return null;
-        }
+        // if (isFailed && existingSet.has(data.id)) {
+        //   return null;
+        // }
 
         const currentLastRef = refMap.get(data.id) || 0;
-        const nextRef = isFailed ? currentLastRef : currentLastRef + 1;
-
-        if (!isFailed) {
-          refMap.set(data.id, nextRef);
-        }
+        const nextRef = currentLastRef + 1;
+        refMap.set(data.id, nextRef);
 
         return {
           id: data.id,

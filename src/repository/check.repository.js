@@ -3,21 +3,13 @@ import db from "../config/db.js";
 
 export default class CheckRepository {
   static async getAllUrl(consoleId, limit = 10) {
-    const lockName = `GST_CLAIM_${consoleId}`;
-
-    // 1️⃣ Ambil lock (tunggu max 3 detik)
-    const [[lock]] = await db.query(`SELECT GET_LOCK(?, 3) AS gotLock`, [
-      lockName,
-    ]);
-
-    if (lock.gotLock !== 1) {
-      // gagal dapet lock → jangan paksa
-      return [];
-    }
+    const conn = await db.getConnection(); // ambil 1 koneksi tetap
 
     try {
-      // 2️⃣ Ambil ID dulu
-      const [ids] = await db.query(
+      await conn.beginTransaction();
+
+      // 1️⃣ Select + Lock
+      const [ids] = await conn.query(
         `
       SELECT id
       FROM gst_check_quota
@@ -25,16 +17,20 @@ export default class CheckRepository {
       AND console = ?
       ORDER BY id ASC
       LIMIT ?
+      FOR UPDATE
       `,
         [consoleId, limit],
       );
 
-      if (ids.length === 0) return [];
+      if (!ids.length) {
+        await conn.commit();
+        return [];
+      }
 
       const idList = ids.map((r) => r.id);
 
-      // 3️⃣ Tandai sebagai processing
-      await db.query(
+      // 2️⃣ Update status jadi processing
+      await conn.query(
         `
       UPDATE gst_check_quota
       SET status = 1
@@ -43,8 +39,8 @@ export default class CheckRepository {
         [idList],
       );
 
-      // 4️⃣ Ambil data lengkap
-      const [rows] = await db.query(
+      // 3️⃣ Ambil data lengkap
+      const [rows] = await conn.query(
         `
       SELECT id, url_check, sn, msisdn
       FROM gst_check_quota
@@ -54,10 +50,14 @@ export default class CheckRepository {
         [idList],
       );
 
+      await conn.commit();
+
       return rows;
+    } catch (err) {
+      await conn.rollback();
+      throw err;
     } finally {
-      // 5️⃣ LEPAS LOCK (WAJIB)
-      await db.query(`SELECT RELEASE_LOCK(?)`, [lockName]);
+      conn.release();
     }
   }
 
