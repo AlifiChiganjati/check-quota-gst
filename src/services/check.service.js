@@ -233,7 +233,7 @@ export default class CheckService {
             id,
             sn,
             msisdn,
-            statusPaket: "Data Paket Invalid/Incomplete",
+            statusPaket: "Data Paket Invalid/Incomplete(value kosong)",
           };
         } catch (err) {
           return {

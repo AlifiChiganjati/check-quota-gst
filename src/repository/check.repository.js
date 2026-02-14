@@ -153,7 +153,7 @@ VALUES ${placeholders} `;
   static async updateGst() {
     try {
       const [result] = await db.query(
-        "UPDATE gst_check_quota SET status = 0 WHERE status IN (2, 3, 4)",
+        "UPDATE gst_check_quota SET status = 0, last_error_message = NULL WHERE status IN (2, 3, 4)",
       );
       console.log(`Jumlah baris diupdate: ${result.affectedRows}`);
       return result;
